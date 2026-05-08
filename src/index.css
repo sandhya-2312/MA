@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer base {
+  html {
+    @apply h-full;
+  }
+  body {
+    @apply m-0 min-h-full font-sans text-slate-800 antialiased;
+  }
+  #app {
+    @apply flex min-h-full min-h-dvh flex-col;
+  }
+}
