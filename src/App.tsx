@@ -10,6 +10,29 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000
 const SESSION_AUTH_KEY = 'ma_session_auth';
 const toNumber = (value: string) => Number.parseFloat(value) || 0;
 
+function getPathState(pathname: string): { tab: NavTab; summaryProjectId: number | null } {
+  const clean = pathname.trim().toLowerCase();
+  if (clean === '/projects' || clean === '/projects/') return { tab: 'projects', summaryProjectId: null };
+  if (clean === '/members' || clean === '/members/') return { tab: 'members', summaryProjectId: null };
+  if (clean === '/profile' || clean === '/profile/') return { tab: 'profile', summaryProjectId: null };
+  if (clean === '/dashboard' || clean === '/dashboard/' || clean === '/' || clean === '') {
+    return { tab: 'dashboard', summaryProjectId: null };
+  }
+  const summaryMatch = clean.match(/^\/projects\/(\d+)\/?$/);
+  if (summaryMatch) {
+    return { tab: 'projectSummary', summaryProjectId: Number.parseInt(summaryMatch[1], 10) || null };
+  }
+  return { tab: 'dashboard', summaryProjectId: null };
+}
+
+function getPathForState(activeTab: NavTab, summaryProjectId: number | null): string {
+  if (activeTab === 'projectSummary' && summaryProjectId != null) return `/projects/${summaryProjectId}`;
+  if (activeTab === 'projects' || activeTab === 'projectSummary') return '/projects';
+  if (activeTab === 'members') return '/members';
+  if (activeTab === 'profile') return '/profile';
+  return '/dashboard';
+}
+
 function parseDimensionParts(raw: string): number[] {
   const matches = raw.match(/-?\d+(?:\.\d+)?/g) ?? [];
   return matches.map((part) => Number.parseFloat(part)).filter((value) => Number.isFinite(value) && value > 0);
@@ -281,6 +304,38 @@ export default function App() {
     count: project.entries.filter((entry) => entry.user === loggedInUser?.username).length,
   }));
   const userProjectBarMax = Math.max(...userProjectBars.map((item) => item.count), 1);
+  const userMonthlyMetrics = useMemo(() => {
+    const now = new Date();
+    const buckets = Array.from({ length: 6 }, (_, index) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+      const label = d.toLocaleString('en-US', { month: 'short' });
+      return { year: d.getFullYear(), month: d.getMonth(), label, entryCount: 0 };
+    });
+    const byMonth = new Map<string, number>();
+    buckets.forEach((bucket, index) => byMonth.set(`${bucket.year}-${bucket.month}`, index));
+    userEntries.forEach((entry) => {
+      const parsed = new Date(entry.createdAt);
+      if (Number.isNaN(parsed.getTime())) return;
+      const idx = byMonth.get(`${parsed.getFullYear()}-${parsed.getMonth()}`);
+      if (idx == null) return;
+      buckets[idx].entryCount += 1;
+    });
+    return {
+      months: buckets.map((bucket) => bucket.label),
+      entryValues: buckets.map((bucket) => bucket.entryCount),
+    };
+  }, [userEntries]);
+  const userActivityMonths = userMonthlyMetrics.months;
+  const userActivityValues = userMonthlyMetrics.entryValues;
+  const userActivityMax = Math.max(...userActivityValues, 1);
+  const userActivityPoints = userActivityValues
+    .map((value, index) => {
+      if (userActivityValues.length === 1) return '50,50';
+      const x = (index / (userActivityValues.length - 1)) * 100;
+      const y = 100 - (value / userActivityMax) * 100;
+      return `${x},${y}`;
+    })
+    .join(' ');
   const viewerActiveUsers = new Set(visibleProjects.flatMap((project) => project.entries.map((entry) => entry.user))).size;
   const viewerCompletionRate = visibleProjects.length
     ? Math.round((visibleProjects.filter((project) => project.entries.length > 0).length / visibleProjects.length) * 100)
@@ -1029,6 +1084,20 @@ export default function App() {
   }, [auth]);
 
   useEffect(() => {
+    if (!auth || auth.firstLogin) return;
+    const pathState = getPathState(window.location.pathname);
+    const allowMembers = auth.role === 'Admin';
+    const nextTab = !allowMembers && pathState.tab === 'members' ? 'dashboard' : pathState.tab;
+    if (nextTab === 'projectSummary') {
+      setSummaryProjectId(pathState.summaryProjectId);
+      setActiveTab('projectSummary');
+      return;
+    }
+    setSummaryProjectId(null);
+    setActiveTab(nextTab);
+  }, [auth?.accessToken, auth?.firstLogin, auth?.role]);
+
+  useEffect(() => {
     try {
       if (auth) localStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(auth));
       else localStorage.removeItem(SESSION_AUTH_KEY);
@@ -1036,6 +1105,14 @@ export default function App() {
       /* ignore quota / private mode */
     }
   }, [auth]);
+
+  useEffect(() => {
+    const targetPath = !auth ? '/login' : auth.firstLogin ? '/setup' : getPathForState(activeTab, summaryProjectId);
+    const current = window.location.pathname;
+    if (current !== targetPath) {
+      window.history.replaceState(null, '', targetPath);
+    }
+  }, [auth, activeTab, summaryProjectId]);
 
   useEffect(() => {
     const token = auth?.accessToken;
@@ -1117,6 +1194,10 @@ export default function App() {
       userTrendValues={userTrendValues}
       userTrendMax={userTrendMax}
       userTrendPoints={userTrendPoints}
+      userActivityMonths={userActivityMonths}
+      userActivityValues={userActivityValues}
+      userActivityMax={userActivityMax}
+      userActivityPoints={userActivityPoints}
       userProjectBars={userProjectBars}
       userProjectBarMax={userProjectBarMax}
       users={users}

@@ -330,6 +330,10 @@ type DashboardPageProps = {
   userTrendValues: number[];
   userTrendMax: number;
   userTrendPoints: string;
+  userActivityMonths: string[];
+  userActivityValues: number[];
+  userActivityMax: number;
+  userActivityPoints: string;
   userProjectBars: UserProjectBar[];
   userProjectBarMax: number;
   users: UserAccount[];
@@ -412,6 +416,10 @@ export function DashboardPage({
   userTrendValues,
   userTrendMax,
   userTrendPoints,
+  userActivityMonths,
+  userActivityValues,
+  userActivityMax,
+  userActivityPoints,
   userProjectBars,
   userProjectBarMax,
   users,
@@ -741,80 +749,6 @@ export function DashboardPage({
       ),
     [filteredVisibleProjects],
   );
-
-  const userWeightDonut = useMemo(() => {
-    type Slice = {
-      key: string;
-      name: string;
-      weight: number;
-      pct: number;
-      color: string;
-      path: string;
-      labelX: number;
-      labelY: number;
-      midAngle: number;
-    };
-    const rows = filteredVisibleProjects.map((p, index) => ({
-      index,
-      id: p.id,
-      name: p.name,
-      weight: sumEntryWeightKg(p.entries.filter((e) => e.user === loggedInUser.username)),
-    }));
-    const totalW = rows.reduce((s, r) => s + r.weight, 0);
-    if (totalW <= 0) {
-      return { totalW: 0, slices: [] as Slice[] };
-    }
-    const cx = 50;
-    const cy = 50;
-    const innerR = 28;
-    const outerR = 42;
-    const labelR = 56;
-    const nonZero = rows.filter((r) => r.weight > 0);
-    const slices: Slice[] = [];
-
-    if (nonZero.length === 1) {
-      const row = nonZero[0];
-      const color = DONUT_COLORS[row.index % DONUT_COLORS.length];
-      const path = `${donutSegmentPath(cx, cy, innerR, outerR, -Math.PI / 2, Math.PI / 2)} ${donutSegmentPath(cx, cy, innerR, outerR, Math.PI / 2, (3 * Math.PI) / 2)}`;
-      const midAngle = -Math.PI / 2;
-      slices.push({
-        key: `${row.id}`,
-        name: row.name,
-        weight: row.weight,
-        pct: 100,
-        color,
-        path,
-        labelX: cx + labelR * Math.cos(midAngle),
-        labelY: cy + labelR * Math.sin(midAngle),
-        midAngle,
-      });
-      return { totalW, slices };
-    }
-
-    let angle = -Math.PI / 2;
-    nonZero.forEach((row) => {
-      const frac = row.weight / totalW;
-      const span = frac * 2 * Math.PI;
-      const start = angle;
-      const end = angle + span;
-      const color = DONUT_COLORS[row.index % DONUT_COLORS.length];
-      const path = donutSegmentPath(cx, cy, innerR, outerR, start, end);
-      const midAngle = start + span / 2;
-      slices.push({
-        key: `${row.id}`,
-        name: row.name,
-        weight: row.weight,
-        pct: frac * 100,
-        color,
-        path,
-        labelX: cx + labelR * Math.cos(midAngle),
-        labelY: cy + labelR * Math.sin(midAngle),
-        midAngle,
-      });
-      angle = end;
-    });
-    return { totalW, slices };
-  }, [filteredVisibleProjects, loggedInUser.username]);
 
   const userRecentEntries = useMemo(() => {
     type Flat = {
@@ -1439,9 +1373,9 @@ export function DashboardPage({
                         <IconStatBars />
                       </div>
                       <div className="min-w-0 flex-1 space-y-1.5">
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Total Weight (kg)</p>
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Total Weight (tons)</p>
                         <p className="text-lg font-bold tabular-nums leading-none text-slate-900">
-                          {adminTotalWeight.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                          {(adminTotalWeight / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                         </p>
                         <p className="text-[10px] text-slate-500">All projects</p>
                       </div>
@@ -1509,9 +1443,9 @@ export function DashboardPage({
                           <IconStatBars />
                         </div>
                         <div className="min-w-0 flex-1 space-y-1.5">
-                          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Total Weight (kg)</p>
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Total Weight (tons)</p>
                           <p className="text-lg font-bold tabular-nums leading-none text-slate-900">
-                            {viewerTotalWeight.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            {(viewerTotalWeight / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                           </p>
                           <p className="text-[10px] text-slate-500">Visible scope</p>
                         </div>
@@ -2212,9 +2146,9 @@ export function DashboardPage({
                           <IconStatBars />
                         </div>
                         <div className="min-w-0 flex-1 space-y-1.5">
-                          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Total Project Weight (kg)</p>
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Total Project Weight (tons)</p>
                           <p className="text-lg font-bold tabular-nums leading-none text-slate-900">
-                            {userTotalWeight.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            {(userTotalWeight / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                           </p>
                           <p className="text-[10px] text-slate-500">Across assigned projects</p>
                         </div>
@@ -2348,61 +2282,13 @@ export function DashboardPage({
                       </p>
                     </article>
 
-                    <article className="rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)] lg:col-span-4">
-                      <h3 className="mb-2 text-sm font-semibold text-slate-900">My weight by project</h3>
-                      {userWeightDonut.slices.length === 0 ? (
-                        <div className="flex min-h-[120px] items-center justify-center py-6 text-xs text-slate-500">
-                          No weight data to chart
-                        </div>
-                      ) : (
-                        <>
-                          <div className="relative flex min-h-[120px] items-center justify-center py-1">
-                            <svg
-                              viewBox="0 0 100 100"
-                              className="h-28 w-full max-w-[160px] overflow-visible sm:h-32 sm:max-w-[180px]"
-                              role="img"
-                              aria-label="Your weight share by project"
-                            >
-                              {userWeightDonut.slices.map((s) => (
-                                <path key={s.key} d={s.path} fill={s.color} stroke="white" strokeWidth="0.5" />
-                              ))}
-                              {userWeightDonut.slices.map((s) => {
-                                const t =
-                                  Math.cos(s.midAngle) < -0.15
-                                    ? 'end'
-                                    : Math.cos(s.midAngle) > 0.15
-                                      ? 'start'
-                                      : 'middle';
-                                return (
-                                  <text
-                                    key={`lbl-${s.key}`}
-                                    x={s.labelX}
-                                    y={s.labelY}
-                                    textAnchor={t}
-                                    dominantBaseline="middle"
-                                    className="fill-slate-700"
-                                    style={{ fontSize: '3px' }}
-                                  >
-                                    {`${s.weight.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg (${s.pct.toFixed(1)}%)`}
-                                  </text>
-                                );
-                              })}
-                            </svg>
-                          </div>
-                          <ul className="mt-2 space-y-1 border-t border-slate-100 pt-2 text-[10px] leading-tight text-slate-700">
-                            {filteredVisibleProjects.map((p, index) => (
-                              <li key={p.id} className="flex items-start gap-2">
-                                <span
-                                  className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-sm"
-                                  style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }}
-                                />
-                                <span className="leading-snug">{p.name}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-                    </article>
+                    <div className="lg:col-span-4">
+                      <TonnageBarChartCard
+                        title="My Tonnage Overview"
+                        plannedWeightKg={userTotalWeight}
+                        actualWeightKg={sumEntryWeightKg(filteredVisibleProjects.flatMap((p) => p.entries.filter((e) => e.user === loggedInUser.username)))}
+                      />
+                    </div>
                   </section>
 
                   <section className="w-full">
@@ -2477,11 +2363,13 @@ export function DashboardPage({
                   <section className="grid gap-3 md:grid-cols-3 md:gap-4">
                     <article className="rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)]">
                       <h4 className="mb-2 text-sm font-semibold text-slate-900">Project Trend</h4>
+                      <p className="mb-2 text-[10px] text-slate-500">Last 6 entries weight trend (kg)</p>
                       <div className="space-y-3">
                         {userTrendEntries.length > 0 ? (
                           <>
                             <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                               <svg viewBox="0 0 100 100" className="h-32 w-full">
+                                <line x1="0" y1="90" x2="100" y2="90" stroke="#cbd5e1" strokeWidth="1" />
                                 <polyline
                                   fill="none"
                                   stroke="#14b8a6"
@@ -2493,9 +2381,16 @@ export function DashboardPage({
                                 {userTrendValues.map((value, index) => {
                                   const x = userTrendValues.length === 1 ? 50 : (index / (userTrendValues.length - 1)) * 100;
                                   const y = 100 - (value / userTrendMax) * 100;
-                                  return <circle key={`${value}-${index}`} cx={x} cy={y} r="2" fill="#0d9488" />;
+                                  return <circle key={`ut-${value}-${index}`} cx={x} cy={y} r="2" fill="#0d9488" />;
                                 })}
                               </svg>
+                            </div>
+                            <div className="mt-2 grid grid-cols-5 gap-1.5 text-[10px] text-slate-600">
+                              {userTrendEntries.map((entry, index) => (
+                                <span key={`utm-${entry.createdAt}-${index}`} className="rounded bg-teal-50 px-1.5 py-0.5 text-center">
+                                  {entry.createdAt.slice(5, 10)}
+                                </span>
+                              ))}
                             </div>
                             <div className="grid max-h-40 gap-1.5 overflow-y-auto no-scrollbar">
                               {userTrendEntries.map((entry, index) => (
@@ -2517,6 +2412,7 @@ export function DashboardPage({
                     </article>
                     <article className="rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)]">
                       <h4 className="mb-2 text-sm font-semibold text-slate-900">Project Comparison</h4>
+                      <p className="mb-2 text-[10px] text-slate-500">Your entry count by project</p>
                       <div className="space-y-2">
                         {userProjectBars.map((project) => {
                           const width = `${(project.count / userProjectBarMax) * 100}%`;
@@ -2537,7 +2433,7 @@ export function DashboardPage({
                     </article>
                     <article className="rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)]">
                       <h4 className="mb-1 text-sm font-semibold text-slate-900">Activity overview</h4>
-                      <p className="mb-2 text-[10px] text-slate-500">Sample monthly trend (demo)</p>
+                      <p className="mb-2 text-[10px] text-slate-500">Last 6 months entries trend</p>
                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                         <svg viewBox="0 0 100 100" className="h-32 w-full">
                           <line x1="0" y1="90" x2="100" y2="90" stroke="#cbd5e1" strokeWidth="1" />
@@ -2547,23 +2443,21 @@ export function DashboardPage({
                             strokeWidth="2.4"
                             strokeLinecap="round"
                             strokeLinejoin="round"
-                            points="10,78 28,66 46,58 64,42 82,31 95,22"
+                            points={userActivityPoints}
                           />
-                          <circle cx="10" cy="78" r="2" fill="#7c3aed" />
-                          <circle cx="28" cy="66" r="2" fill="#7c3aed" />
-                          <circle cx="46" cy="58" r="2" fill="#7c3aed" />
-                          <circle cx="64" cy="42" r="2" fill="#7c3aed" />
-                          <circle cx="82" cy="31" r="2" fill="#7c3aed" />
-                          <circle cx="95" cy="22" r="2" fill="#7c3aed" />
+                          {userActivityValues.map((value, index) => {
+                            const x = userActivityValues.length === 1 ? 50 : (index / (userActivityValues.length - 1)) * 100;
+                            const y = 100 - (value / userActivityMax) * 100;
+                            return <circle key={`ua-${value}-${index}`} cx={x} cy={y} r="2" fill="#7c3aed" />;
+                          })}
                         </svg>
                       </div>
                       <div className="mt-2 grid grid-cols-3 gap-1.5 text-[10px] text-slate-600">
-                        <span className="rounded bg-violet-50 px-1.5 py-0.5 text-center">Jan</span>
-                        <span className="rounded bg-violet-50 px-1.5 py-0.5 text-center">Feb</span>
-                        <span className="rounded bg-violet-50 px-1.5 py-0.5 text-center">Mar</span>
-                        <span className="rounded bg-violet-50 px-1.5 py-0.5 text-center">Apr</span>
-                        <span className="rounded bg-violet-50 px-1.5 py-0.5 text-center">May</span>
-                        <span className="rounded bg-violet-50 px-1.5 py-0.5 text-center">Jun</span>
+                        {userActivityMonths.map((month, index) => (
+                          <span key={`uam-${month}-${index}`} className="rounded bg-violet-50 px-1.5 py-0.5 text-center">
+                            {month}
+                          </span>
+                        ))}
                       </div>
                     </article>
                   </section>
