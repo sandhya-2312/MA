@@ -1030,6 +1030,14 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
+        if (auth.firstLogin) {
+          await refreshCurrentUserProfile(token);
+          if (!cancelled) {
+            setLoginError('');
+            setStatus('Complete First Login Setup to continue.');
+          }
+          return;
+        }
         await loadProjectsWithData(token, auth.username, auth.role, { adminSearch: '' });
         await loadUsers(token, auth.role);
         await refreshCurrentUserProfile(token);
@@ -1052,9 +1060,9 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-    // Intentionally only re-run when the access token changes (login / restore / logout).
+    // Intentionally only re-run when the access token or first-login state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load* fns close over latest auth fields for the same token
-  }, [auth?.accessToken]);
+  }, [auth?.accessToken, auth?.firstLogin]);
 
   if (!loggedInUser || !auth) {
     return <LoginPage onSubmit={handleLogin} loginError={loginError} />;

@@ -60,11 +60,8 @@ npm run preview
 2. Set `VITE_API_URL` on Vercel to the Render API URL and redeploy the frontend.
 3. Copy existing application data into production when needed using `MA-api/scripts/copy_application_data.py`.
 4. Configure deployment login accounts on Render when a role account is missing (`INITIAL_ADMIN_*`, `INITIAL_USER_*`, `INITIAL_VIEWER_*`).
-5. Sign in at `/login` with the matching role credentials:
-   - Admin opens the admin dashboard.
-   - User opens assigned project workflows.
-   - Viewer opens read-only assigned project views.
-6. Accounts with `first_login=false` open their dashboard immediately. Accounts with `first_login=true` complete First Login Setup first.
+5. Sign in at `/login` with the configured default credentials. New deployment accounts open First Login Setup on `/setup` so you can set profile details, username, and password before the dashboard loads.
+6. Set `INITIAL_*_FIRST_LOGIN=false` on Render only for copied or preconfigured accounts that should skip setup and open their dashboard immediately.
 
 ## Backend login
 
