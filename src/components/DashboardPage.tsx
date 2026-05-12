@@ -16,6 +16,7 @@ import type { NavTab, Project, ProjectEntry, Role, UserAccount } from '../types'
 
 type UserEntryWithProject = ProjectEntry & { projectName: string };
 type UserProjectBar = { id: number; name: string; count: number };
+type TonnageBarDatum = { key: string; label: string; tonnage: number; color: string };
 
 const navIconClass = 'h-4 w-4 shrink-0';
 
@@ -147,6 +148,36 @@ function sumEntryWeldingM(entries: ProjectEntry[]) {
   return entries.reduce((s, e) => s + (parseFloat(e.weldingMeters) || 0), 0);
 }
 
+type ProductionRange = 'daily' | 'weekly' | 'monthly';
+
+function productionRangeSinceMs(range: ProductionRange, now = Date.now()): number {
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (range === 'daily') return now - dayMs;
+  if (range === 'weekly') return now - 7 * dayMs;
+  return now - 30 * dayMs;
+}
+
+function productionRangeWindowLabel(range: ProductionRange): string {
+  if (range === 'daily') return '24 hours';
+  if (range === 'weekly') return '7 days';
+  return '30 days';
+}
+
+function filterProjectsEntriesSince(
+  projects: Project[],
+  sinceMs: number,
+  entryUsername?: string,
+): Project[] {
+  return projects.map((project) => ({
+    ...project,
+    entries: project.entries.filter((entry) => {
+      if (entryUsername && entry.user !== entryUsername) return false;
+      const createdAtMs = Date.parse(entry.createdAt);
+      return !Number.isNaN(createdAtMs) && createdAtMs >= sinceMs;
+    }),
+  }));
+}
+
 function sumProjectMaterialWeightKg(project: Project): number {
   return (project.materials ?? []).reduce((sum, material) => sum + computeStoredMaterialWeightKg(material), 0);
 }
@@ -230,51 +261,105 @@ type TonnageBarChartCardProps = {
   title: string;
   plannedWeightKg: number;
   actualWeightKg: number;
+  projectBars: TonnageBarDatum[];
+  materialBars: TonnageBarDatum[];
 };
 
-function TonnageBarChartCard({ title, plannedWeightKg, actualWeightKg }: TonnageBarChartCardProps) {
+function buildTonnageBreakdown(projects: Project[], username?: string): { projectBars: TonnageBarDatum[]; materialBars: TonnageBarDatum[] } {
+  const entryProjectWeights = new Map<number, number>();
+  const entryMaterialWeights = new Map<string, number>();
+
+  projects.forEach((project) => {
+    let projectWeight = 0;
+    project.entries.forEach((entry) => {
+      if (username && entry.user !== username) return;
+      const weightKg = parseFloat(entry.weight) || parseFloat(entry.value) || 0;
+      if (weightKg <= 0) return;
+      projectWeight += weightKg;
+      const materialName = entry.itemDetails.trim() || 'Unknown material';
+      entryMaterialWeights.set(materialName, (entryMaterialWeights.get(materialName) ?? 0) + weightKg);
+    });
+    if (projectWeight > 0) {
+      entryProjectWeights.set(project.id, projectWeight);
+    }
+  });
+
+  // Fallback to planned/material master data when there are no entry-level weight rows.
+  if (entryProjectWeights.size === 0 && entryMaterialWeights.size === 0) {
+    projects.forEach((project) => {
+      let projectWeight = 0;
+      (project.materials ?? []).forEach((material) => {
+        const weightKg = computeStoredMaterialWeightKg(material);
+        if (weightKg <= 0) return;
+        projectWeight += weightKg;
+        const materialName = material.name.trim() || 'Unknown material';
+        entryMaterialWeights.set(materialName, (entryMaterialWeights.get(materialName) ?? 0) + weightKg);
+      });
+      if (projectWeight > 0) {
+        entryProjectWeights.set(project.id, projectWeight);
+      }
+    });
+  }
+
+  const sortedProjects = projects
+    .map((project) => ({ id: project.id, name: project.name, weightKg: entryProjectWeights.get(project.id) ?? 0 }))
+    .filter((row) => row.weightKg > 0)
+    .sort((a, b) => b.weightKg - a.weightKg);
+  const sortedMaterials = Array.from(entryMaterialWeights.entries())
+    .map(([name, weightKg]) => ({ name, weightKg }))
+    .filter((row) => row.weightKg > 0)
+    .sort((a, b) => b.weightKg - a.weightKg);
+
+  return {
+    projectBars: sortedProjects.map((row, index) => ({
+      key: `project-${row.id}`,
+      label: row.name,
+      tonnage: row.weightKg / 1000,
+      color: DONUT_COLORS[index % DONUT_COLORS.length],
+    })),
+    materialBars: sortedMaterials.map((row, index) => ({
+      key: `material-${row.name}-${index}`,
+      label: row.name,
+      tonnage: row.weightKg / 1000,
+      color: DONUT_COLORS[index % DONUT_COLORS.length],
+    })),
+  };
+}
+
+function TonnageBarChartCard({ title, plannedWeightKg, actualWeightKg, projectBars, materialBars }: TonnageBarChartCardProps) {
   const totalTonnage = Math.max(plannedWeightKg, 0) / 1000;
   const actualTonnage = Math.max(actualWeightKg, 0) / 1000;
-  const maxValue = Math.max(totalTonnage, actualTonnage, 1) * 1.15;
-  const yAxisTicks = Array.from({ length: 5 }, (_, index) => {
-    const ratio = index / 4;
-    const value = maxValue * (1 - ratio);
-    return { y: 18 + ratio * 64, value };
-  });
-  const totalBarHeight = (totalTonnage / maxValue) * 64;
-  const actualBarHeight = (actualTonnage / maxValue) * 64;
+  const projectChartBars = projectBars.slice(0, 6);
+  const materialChartBars = materialBars.slice(0, 6);
+  const projectMax = Math.max(...projectChartBars.map((bar) => bar.tonnage), 1);
+  const materialMax = Math.max(...materialChartBars.map((bar) => bar.tonnage), 1);
+  const yTicks = [1, 0.75, 0.5, 0.25, 0];
+  const chartTop = 14;
+  const chartBottom = 58;
+  const chartHeight = chartBottom - chartTop;
+
+  const formatAxisLabel = (label: string, maxChars: number) =>
+    label.length > maxChars ? `${label.slice(0, Math.max(1, maxChars - 1))}…` : label;
+
+  const renderBarValueLabel = (bar: TonnageBarDatum, x: number, barWidth: number, y: number) => (
+    <text
+      x={x + barWidth / 2}
+      y={Math.max(7, y - 2.5)}
+      textAnchor="middle"
+      fill="#334155"
+      fontSize="4.6"
+      fontWeight="600"
+    >
+      {`${bar.tonnage.toFixed(2)}t`}
+    </text>
+  );
 
   return (
     <article className="flex min-h-0 flex-col rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)] lg:col-span-4">
       <h3 className="mb-1 text-sm font-semibold text-slate-900">{title}</h3>
-      <p className="mb-3 text-[10px] text-slate-500">Total tonnage vs actual tonnage</p>
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-        <svg viewBox="0 0 100 88" className="h-40 w-full" role="img" aria-label="Total tonnage and actual tonnage bar chart">
-          {yAxisTicks.map((tick) => (
-            <g key={tick.y}>
-              <line x1="14" y1={tick.y} x2="94" y2={tick.y} stroke="#cbd5e1" strokeWidth="0.5" />
-              <text x="12" y={tick.y + 1.5} textAnchor="end" className="fill-slate-500" style={{ fontSize: '3px' }}>
-                {tick.value.toFixed(1)}
-              </text>
-            </g>
-          ))}
-          <line x1="14" y1="82" x2="94" y2="82" stroke="#94a3b8" strokeWidth="0.7" />
-          <rect x="36" y={82 - totalBarHeight} width="10" height={Math.max(totalBarHeight, 0)} rx="1.2" fill="#3b82f6" />
-          <rect x="54" y={82 - actualBarHeight} width="10" height={Math.max(actualBarHeight, 0)} rx="1.2" fill="#10b981" />
-          <text x="41" y="86" textAnchor="middle" className="fill-slate-600" style={{ fontSize: '3px' }}>
-            Total
-          </text>
-          <text x="59" y="86" textAnchor="middle" className="fill-slate-600" style={{ fontSize: '3px' }}>
-            Actual
-          </text>
-          <text x="41" y={Math.max(12, 80 - totalBarHeight)} textAnchor="middle" className="fill-slate-700" style={{ fontSize: '3px' }}>
-            {totalTonnage.toFixed(2)}t
-          </text>
-          <text x="59" y={Math.max(12, 80 - actualBarHeight)} textAnchor="middle" className="fill-slate-700" style={{ fontSize: '3px' }}>
-            {actualTonnage.toFixed(2)}t
-          </text>
-        </svg>
-        <div className="mt-1 flex items-center justify-center gap-4 text-[10px] text-slate-700">
+      <p className="mb-3 text-[10px] text-slate-500">Project-wise and material-wise tonnage</p>
+      <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+        <div className="flex items-center justify-center gap-4 text-[10px] text-slate-700">
           <span className="inline-flex items-center gap-1">
             <span className="h-2 w-2 rounded-sm bg-blue-500" />
             Total Tonnage
@@ -283,6 +368,90 @@ function TonnageBarChartCard({ title, plannedWeightKg, actualWeightKg }: Tonnage
             <span className="h-2 w-2 rounded-sm bg-emerald-500" />
             Actual Tonnage
           </span>
+        </div>
+        <div className="mt-1 flex items-center justify-center gap-6 text-[11px] font-semibold text-slate-800">
+          <span>{totalTonnage.toFixed(2)}t</span>
+          <span>{actualTonnage.toFixed(2)}t</span>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-600">Project-wise</p>
+          {projectChartBars.length === 0 ? (
+            <p className="text-[11px] text-slate-500">No project tonnage data.</p>
+          ) : (
+            <>
+              <svg viewBox="0 0 100 78" className="h-40 w-full" role="img" aria-label="Project wise tonnage bar chart">
+                {yTicks.map((tick) => {
+                  const y = chartTop + (1 - tick) * chartHeight;
+                  return <line key={`proj-grid-${tick}`} x1="10" y1={y} x2="96" y2={y} stroke="#cbd5e1" strokeWidth="0.45" />;
+                })}
+                <line x1="10" y1={chartBottom} x2="96" y2={chartBottom} stroke="#94a3b8" strokeWidth="0.7" />
+                {projectChartBars.map((bar, index) => {
+                  const slot = 86 / projectChartBars.length;
+                  const barWidth = Math.min(10, slot * 0.68);
+                  const x = 10 + slot * index + (slot - barWidth) / 2;
+                  const barHeight = (bar.tonnage / projectMax) * chartHeight;
+                  const y = chartBottom - barHeight;
+                  const label = formatAxisLabel(bar.label, Math.max(8, Math.floor(slot * 1.35)));
+                  const cornerRadius = Math.min(2.2, barWidth / 2, Math.max(barHeight, 0) / 2);
+                  return (
+                    <g key={bar.key}>
+                      <title>{`${bar.label}: ${bar.tonnage.toFixed(2)}t`}</title>
+                      <rect x={x} y={y} width={barWidth} height={Math.max(barHeight, 0)} rx={cornerRadius} fill={bar.color} />
+                      {renderBarValueLabel(bar, x, barWidth, y)}
+                      <text x={x + barWidth / 2} y="69.5" textAnchor="middle" fill="#475569" fontSize="4.1">
+                        {label}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+              {projectBars.length > projectChartBars.length && (
+                <p className="mt-1 text-[10px] text-slate-500">Showing top {projectChartBars.length} projects by tonnage.</p>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-600">Material-wise</p>
+          {materialChartBars.length === 0 ? (
+            <p className="text-[11px] text-slate-500">No material tonnage data.</p>
+          ) : (
+            <>
+              <svg viewBox="0 0 100 78" className="h-40 w-full" role="img" aria-label="Material wise tonnage bar chart">
+                {yTicks.map((tick) => {
+                  const y = chartTop + (1 - tick) * chartHeight;
+                  return <line key={`mat-grid-${tick}`} x1="10" y1={y} x2="96" y2={y} stroke="#cbd5e1" strokeWidth="0.45" />;
+                })}
+                <line x1="10" y1={chartBottom} x2="96" y2={chartBottom} stroke="#94a3b8" strokeWidth="0.7" />
+                {materialChartBars.map((bar, index) => {
+                  const slot = 86 / materialChartBars.length;
+                  const barWidth = Math.min(10, slot * 0.68);
+                  const x = 10 + slot * index + (slot - barWidth) / 2;
+                  const barHeight = (bar.tonnage / materialMax) * chartHeight;
+                  const y = chartBottom - barHeight;
+                  const label = formatAxisLabel(bar.label, Math.max(8, Math.floor(slot * 1.35)));
+                  const cornerRadius = Math.min(2.2, barWidth / 2, Math.max(barHeight, 0) / 2);
+                  return (
+                    <g key={bar.key}>
+                      <title>{`${bar.label}: ${bar.tonnage.toFixed(2)}t`}</title>
+                      <rect x={x} y={y} width={barWidth} height={Math.max(barHeight, 0)} rx={cornerRadius} fill={bar.color} />
+                      {renderBarValueLabel(bar, x, barWidth, y)}
+                      <text x={x + barWidth / 2} y="69.5" textAnchor="middle" fill="#475569" fontSize="4.1">
+                        {label}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+              {materialBars.length > materialChartBars.length && (
+                <p className="mt-1 text-[10px] text-slate-500">Showing top {materialChartBars.length} materials by tonnage.</p>
+              )}
+            </>
+          )}
         </div>
       </div>
     </article>
@@ -396,8 +565,6 @@ export function DashboardPage({
   totalProjects,
   totalMembers,
   visibleProjects,
-  userSubmissionCount,
-  latestUserEntry,
   viewerActiveUsers,
   viewerCompletionRate,
   viewerTrendMonths,
@@ -469,15 +636,12 @@ export function DashboardPage({
   const [requestedAdminEditProjectId, setRequestedAdminEditProjectId] = useState<number | null>(null);
   const [requestedUserProjectId, setRequestedUserProjectId] = useState<number | null>(null);
   const [projectFilterId, setProjectFilterId] = useState<number | 'all'>('all');
-  const [productionRange, setProductionRange] = useState<'daily' | 'weekly' | 'monthly'>('daily');
-  const [productionDateFrom, setProductionDateFrom] = useState<string>('');
-  const [productionDateTo, setProductionDateTo] = useState<string>('');
+  const [productionRange, setProductionRange] = useState<ProductionRange>('daily');
   const userMenuRef = useRef<HTMLDivElement>(null);
 
-  const parseEntryTimeMs = (raw: string): number => {
-    const t = Date.parse(raw);
-    return Number.isNaN(t) ? NaN : t;
-  };
+  const productionRangeWindowLabelText = productionRangeWindowLabel(productionRange);
+  const productionScopeLabel = loggedInUser.role === 'User' ? 'your' : 'all';
+  const dashboardEntryScopeCaption = `In the last ${productionRangeWindowLabelText}`;
 
   const accessibleProjectsForFilter = useMemo(() => {
     const base = isAdmin ? projects : visibleProjects;
@@ -495,55 +659,40 @@ export function DashboardPage({
     return visibleProjects.filter((p) => p.id === projectFilterId);
   }, [visibleProjects, projectFilterId]);
 
+  const rangeScopedAdminProjects = useMemo(
+    () => filterProjectsEntriesSince(filteredAdminProjects, productionRangeSinceMs(productionRange)),
+    [filteredAdminProjects, productionRange],
+  );
+
+  const rangeScopedVisibleProjects = useMemo(() => {
+    const entryUsername = loggedInUser.role === 'User' ? loggedInUser.username : undefined;
+    return filterProjectsEntriesSince(
+      filteredVisibleProjects,
+      productionRangeSinceMs(productionRange),
+      entryUsername,
+    );
+  }, [filteredVisibleProjects, productionRange, loggedInUser.role, loggedInUser.username]);
+
   const productionStats = useMemo(() => {
-    const now = Date.now();
-    const dayMs = 24 * 60 * 60 * 1000;
-    const fromRaw = productionDateFrom.trim();
-    const toRaw = productionDateTo.trim();
-    const hasCustomRange = !!(fromRaw || toRaw);
-    const fromMs = fromRaw ? Date.parse(`${fromRaw}T00:00:00`) : NaN;
-    // inclusive end date: add one day and use < endExclusive
-    const toExclusiveMs = toRaw ? Date.parse(`${toRaw}T00:00:00`) + dayMs : NaN;
-    const since =
-      !hasCustomRange
-        ? productionRange === 'daily'
-          ? now - dayMs
-          : productionRange === 'weekly'
-            ? now - 7 * dayMs
-            : now - 30 * dayMs
-        : NaN;
-
-    const baseProjects = loggedInUser.role === 'Admin' ? filteredAdminProjects : filteredVisibleProjects;
-    const entries = baseProjects.flatMap((p) => p.entries);
-    const scopedEntries =
-      loggedInUser.role === 'User' ? entries.filter((e) => e.user === loggedInUser.username) : entries;
-
-    const recent = scopedEntries.filter((e) => {
-      const t = parseEntryTimeMs(e.createdAt);
-      if (Number.isNaN(t)) return false;
-      if (hasCustomRange) {
-        if (!Number.isNaN(fromMs) && t < fromMs) return false;
-        if (!Number.isNaN(toExclusiveMs) && t >= toExclusiveMs) return false;
-        return true;
-      }
-      return t >= since;
-    });
-
+    const scopedProjects = loggedInUser.role === 'Admin' ? rangeScopedAdminProjects : rangeScopedVisibleProjects;
+    const entries = scopedProjects.flatMap((project) => project.entries);
     return {
-      entryCount: recent.length,
-      weightKg: sumEntryWeightKg(recent),
-      weldingM: sumEntryWeldingM(recent),
-      hasCustomRange,
+      entryCount: entries.length,
+      weightKg: sumEntryWeightKg(entries),
+      weldingM: sumEntryWeldingM(entries),
     };
-  }, [
-    productionRange,
-    productionDateFrom,
-    productionDateTo,
-    loggedInUser.role,
-    loggedInUser.username,
-    filteredAdminProjects,
-    filteredVisibleProjects,
-  ]);
+  }, [loggedInUser.role, rangeScopedAdminProjects, rangeScopedVisibleProjects]);
+
+  const dashboardUserSubmissionCount = useMemo(
+    () => rangeScopedVisibleProjects.reduce((sum, project) => sum + project.entries.length, 0),
+    [rangeScopedVisibleProjects],
+  );
+
+  const dashboardLatestUserEntry = useMemo(() => {
+    const entries = rangeScopedVisibleProjects.flatMap((project) => project.entries);
+    entries.sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+    return entries[0];
+  }, [rangeScopedVisibleProjects]);
 
   const summaryProject =
     summaryProjectId != null ? (visibleProjects.find((p) => p.id === summaryProjectId) ?? null) : null;
@@ -576,26 +725,27 @@ export function DashboardPage({
     }
   };
 
-  const adminTotalEntries =
-    projectFilterId === 'all'
-      ? (adminProjectsPageSummary?.totalEntries ?? projects.reduce((sum, p) => sum + p.entries.length, 0))
-      : filteredAdminProjects.reduce((sum, p) => sum + p.entries.length, 0);
+  const adminTotalEntries = useMemo(
+    () => rangeScopedAdminProjects.reduce((sum, project) => sum + project.entries.length, 0),
+    [rangeScopedAdminProjects],
+  );
   const adminTotalWeight = useMemo(
-    () => filteredAdminProjects.reduce((sum, p) => sum + sumProjectMaterialWeightKg(p), 0),
-    [filteredAdminProjects],
+    () => rangeScopedAdminProjects.reduce((sum, p) => sum + sumProjectMaterialWeightKg(p), 0),
+    [rangeScopedAdminProjects],
   );
   const adminTotalWelding = useMemo(
     () =>
-      filteredAdminProjects.reduce(
+      rangeScopedAdminProjects.reduce(
         (sum, p) => sum + p.entries.reduce((s, e) => s + (parseFloat(e.weldingMeters) || 0), 0),
         0,
       ),
-    [filteredAdminProjects],
+    [rangeScopedAdminProjects],
   );
+  const adminTonnageBreakdown = useMemo(() => buildTonnageBreakdown(rangeScopedAdminProjects), [rangeScopedAdminProjects]);
 
   const adminProjectSummaryRows = useMemo(
     () =>
-      filteredAdminProjects.map((p) => ({
+      rangeScopedAdminProjects.map((p) => ({
         id: p.id,
         name: p.name,
         entryCount: p.entries.length,
@@ -604,7 +754,7 @@ export function DashboardPage({
         createdOn: projectCreatedDisplay(p),
         statusLabel: projectSummaryStatusDisplay(p),
       })),
-    [filteredAdminProjects],
+    [rangeScopedAdminProjects],
   );
 
   const adminWeightDonut = useMemo(() => {
@@ -619,7 +769,7 @@ export function DashboardPage({
       labelY: number;
       midAngle: number;
     };
-    const rows = filteredAdminProjects.map((p, index) => ({
+    const rows = rangeScopedAdminProjects.map((p, index) => ({
       index,
       id: p.id,
       name: p.name,
@@ -679,7 +829,7 @@ export function DashboardPage({
       angle = end;
     });
     return { totalW, slices };
-  }, [filteredAdminProjects]);
+  }, [rangeScopedAdminProjects]);
 
   const adminRecentEntries = useMemo(() => {
     type Flat = {
@@ -695,7 +845,7 @@ export function DashboardPage({
       remarks: string;
       sortTime: number;
     };
-    const flat: Flat[] = filteredAdminProjects.flatMap((p) =>
+    const flat: Flat[] = rangeScopedAdminProjects.flatMap((p) =>
       p.entries.map((e, idx) => ({
         key: `${p.id}-${e.dataId ?? idx}-${idx}`,
         projectId: p.id,
@@ -717,12 +867,12 @@ export function DashboardPage({
       projectNames.size === 1 && rows.length > 0 ? ` — ${rows[0].projectName}` : '';
     const showProjectColumn = projectNames.size > 1;
     return { rows, titleSuffix, showProjectColumn };
-  }, [filteredAdminProjects]);
+  }, [rangeScopedAdminProjects]);
 
   const userProjectSummaryRows = useMemo(
     () =>
-      filteredVisibleProjects.map((p) => {
-        const mine = p.entries.filter((e) => e.user === loggedInUser.username);
+      rangeScopedVisibleProjects.map((p) => {
+        const mine = p.entries;
         return {
           id: p.id,
           name: p.name,
@@ -733,21 +883,25 @@ export function DashboardPage({
           statusLabel: projectSummaryStatusDisplay(p),
         };
       }),
-    [filteredVisibleProjects, loggedInUser.username],
+    [rangeScopedVisibleProjects],
   );
 
   const userTotalWeight = useMemo(
-    () => filteredVisibleProjects.reduce((sum, project) => sum + sumProjectMaterialWeightKg(project), 0),
-    [filteredVisibleProjects],
+    () => rangeScopedVisibleProjects.reduce((sum, project) => sum + sumProjectMaterialWeightKg(project), 0),
+    [rangeScopedVisibleProjects],
   );
 
   const userTotalWelding = useMemo(
     () =>
-      filteredVisibleProjects.reduce(
+      rangeScopedVisibleProjects.reduce(
         (sum, project) => sum + project.entries.reduce((entrySum, entry) => entrySum + (parseFloat(entry.weldingMeters) || 0), 0),
         0,
       ),
-    [filteredVisibleProjects],
+    [rangeScopedVisibleProjects],
+  );
+  const userTonnageBreakdown = useMemo(
+    () => buildTonnageBreakdown(rangeScopedVisibleProjects, loggedInUser.username),
+    [rangeScopedVisibleProjects, loggedInUser.username],
   );
 
   const userRecentEntries = useMemo(() => {
@@ -764,10 +918,8 @@ export function DashboardPage({
       remarks: string;
       sortTime: number;
     };
-    const flat: Flat[] = filteredVisibleProjects.flatMap((p) =>
-      p.entries
-        .filter((e) => e.user === loggedInUser.username)
-        .map((e, idx) => ({
+    const flat: Flat[] = rangeScopedVisibleProjects.flatMap((p) =>
+      p.entries.map((e, idx) => ({
           key: `${p.id}-${e.dataId ?? idx}-${idx}`,
           projectId: p.id,
           projectName: p.name,
@@ -788,11 +940,11 @@ export function DashboardPage({
       projectNames.size === 1 && rows.length > 0 ? ` — ${rows[0].projectName}` : '';
     const showProjectColumn = projectNames.size > 1;
     return { rows, titleSuffix, showProjectColumn };
-  }, [filteredVisibleProjects, loggedInUser.username]);
+  }, [rangeScopedVisibleProjects]);
 
   const viewerProjectSummaryRows = useMemo(
     () =>
-      filteredVisibleProjects.map((p) => ({
+      rangeScopedVisibleProjects.map((p) => ({
         id: p.id,
         name: p.name,
         entryCount: p.entries.length,
@@ -801,27 +953,28 @@ export function DashboardPage({
         createdOn: projectCreatedDisplay(p),
         statusLabel: projectSummaryStatusDisplay(p),
       })),
-    [filteredVisibleProjects],
+    [rangeScopedVisibleProjects],
   );
 
   const viewerTotalEntries = useMemo(
-    () => filteredVisibleProjects.reduce((sum, p) => sum + p.entries.length, 0),
-    [filteredVisibleProjects],
+    () => rangeScopedVisibleProjects.reduce((sum, p) => sum + p.entries.length, 0),
+    [rangeScopedVisibleProjects],
   );
 
   const viewerTotalWeight = useMemo(
-    () => filteredVisibleProjects.reduce((sum, p) => sum + sumProjectMaterialWeightKg(p), 0),
-    [filteredVisibleProjects],
+    () => rangeScopedVisibleProjects.reduce((sum, p) => sum + sumProjectMaterialWeightKg(p), 0),
+    [rangeScopedVisibleProjects],
   );
 
   const viewerTotalWelding = useMemo(
     () =>
-      filteredVisibleProjects.reduce(
+      rangeScopedVisibleProjects.reduce(
         (sum, p) => sum + p.entries.reduce((s, e) => s + (parseFloat(e.weldingMeters) || 0), 0),
         0,
       ),
-    [filteredVisibleProjects],
+    [rangeScopedVisibleProjects],
   );
+  const viewerTonnageBreakdown = useMemo(() => buildTonnageBreakdown(rangeScopedVisibleProjects), [rangeScopedVisibleProjects]);
 
   const viewerWeightDonut = useMemo(() => {
     type Slice = {
@@ -835,7 +988,7 @@ export function DashboardPage({
       labelY: number;
       midAngle: number;
     };
-    const rows = filteredVisibleProjects.map((p, index) => ({
+    const rows = rangeScopedVisibleProjects.map((p, index) => ({
       index,
       id: p.id,
       name: p.name,
@@ -895,7 +1048,7 @@ export function DashboardPage({
       angle = end;
     });
     return { totalW, slices };
-  }, [filteredVisibleProjects]);
+  }, [rangeScopedVisibleProjects]);
 
   const viewerRecentEntries = useMemo(() => {
     type Flat = {
@@ -911,7 +1064,7 @@ export function DashboardPage({
       remarks: string;
       sortTime: number;
     };
-    const flat: Flat[] = filteredVisibleProjects.flatMap((p) =>
+    const flat: Flat[] = rangeScopedVisibleProjects.flatMap((p) =>
       p.entries.map((e, idx) => ({
         key: `${p.id}-${e.dataId ?? idx}-${idx}`,
         projectId: p.id,
@@ -933,7 +1086,7 @@ export function DashboardPage({
       projectNames.size === 1 && rows.length > 0 ? ` — ${rows[0].projectName}` : '';
     const showProjectColumn = projectNames.size > 1;
     return { rows, titleSuffix, showProjectColumn };
-  }, [filteredVisibleProjects]);
+  }, [rangeScopedVisibleProjects]);
 
   useEffect(() => {
     if (!userMenuOpen) return;
@@ -1208,8 +1361,8 @@ export function DashboardPage({
             <h1 className="truncate text-base font-semibold tracking-tight text-slate-900 sm:text-lg">{pageTitle}</h1>
 
             {activeTab === 'dashboard' && (
-              <div className="mt-3 space-y-3">
-                <div className="flex items-center justify-end gap-2">
+              <div className="mt-4 space-y-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
                   <label htmlFor="dashboard-project-filter-above" className="sr-only">
                     Project Filter
                   </label>
@@ -1232,76 +1385,40 @@ export function DashboardPage({
                   </select>
                 </div>
 
-                <div className="rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)]">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
+                <article className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-[0_4px_14px_rgba(0,0,0,0.04)]">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Production</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">
+                      <p className="mt-1 text-2xl font-bold tabular-nums leading-none text-slate-900">
                         {productionStats.weightKg.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg
                       </p>
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        Based on {productionScopeLabel} entries from the last {productionRangeWindowLabelText}.
+                      </p>
                     </div>
-                    <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+                    <div
+                      className="inline-flex shrink-0 self-start rounded-lg border border-slate-200 bg-slate-50 p-1 sm:self-center"
+                      role="group"
+                      aria-label="Production range"
+                    >
                       {(['daily', 'weekly', 'monthly'] as const).map((range) => (
                         <button
                           key={range}
                           type="button"
                           onClick={() => setProductionRange(range)}
-                          className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                          aria-pressed={productionRange === range}
+                          className={`min-w-[4.75rem] rounded-md px-3 py-1.5 text-xs font-semibold capitalize transition ${
                             productionRange === range
                               ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
                               : 'text-slate-600 hover:bg-slate-100'
                           }`}
                         >
-                          {range === 'daily' ? 'Daily' : range === 'weekly' ? 'Weekly' : 'Monthly'}
+                          {range}
                         </button>
                       ))}
                     </div>
                   </div>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-3 sm:items-end">
-                    <div>
-                      <label htmlFor="production-from" className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                        From
-                      </label>
-                      <input
-                        id="production-from"
-                        type="date"
-                        value={productionDateFrom}
-                        onChange={(e) => setProductionDateFrom(e.target.value)}
-                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-200 transition focus:ring-2"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="production-to" className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                        To
-                      </label>
-                      <input
-                        id="production-to"
-                        type="date"
-                        value={productionDateTo}
-                        onChange={(e) => setProductionDateTo(e.target.value)}
-                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-slate-200 transition focus:ring-2"
-                      />
-                    </div>
-                    <div className="flex gap-2 sm:justify-end">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setProductionDateFrom('');
-                          setProductionDateTo('');
-                        }}
-                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:w-auto"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-                  <p className="mt-1 text-[10px] text-slate-500">
-                    Based on {loggedInUser.role === 'User' ? 'your' : 'all'} entries{' '}
-                    {productionStats.hasCustomRange
-                      ? 'in the selected date range.'
-                      : `from the last ${productionRange === 'daily' ? '24 hours' : productionRange === 'weekly' ? '7 days' : '30 days'}.`}
-                  </p>
-                </div>
+                </article>
               </div>
             )}
           </div>
@@ -1363,7 +1480,7 @@ export function DashboardPage({
                       <div className="min-w-0 flex-1 space-y-1.5">
                         <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Total Entries</p>
                         <p className="text-lg font-bold tabular-nums leading-none text-slate-900">{adminTotalEntries}</p>
-                        <p className="text-[10px] text-slate-500">All project entries</p>
+                        <p className="text-[10px] text-slate-500">{dashboardEntryScopeCaption}</p>
                       </div>
                     </div>
                   </article>
@@ -1377,7 +1494,7 @@ export function DashboardPage({
                         <p className="text-lg font-bold tabular-nums leading-none text-slate-900">
                           {(adminTotalWeight / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                         </p>
-                        <p className="text-[10px] text-slate-500">All projects</p>
+                        <p className="text-[10px] text-slate-500">{dashboardEntryScopeCaption}</p>
                       </div>
                     </div>
                   </article>
@@ -1391,7 +1508,7 @@ export function DashboardPage({
                         <p className="text-lg font-bold tabular-nums leading-none text-slate-900">
                           {adminTotalWelding.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                         </p>
-                        <p className="text-[10px] text-slate-500">All projects</p>
+                        <p className="text-[10px] text-slate-500">{dashboardEntryScopeCaption}</p>
                       </div>
                     </div>
                   </article>
@@ -1433,7 +1550,7 @@ export function DashboardPage({
                         <div className="min-w-0 flex-1 space-y-1.5">
                           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Total Entries</p>
                           <p className="text-lg font-bold tabular-nums leading-none text-slate-900">{viewerTotalEntries}</p>
-                          <p className="text-[10px] text-slate-500">Across visible projects</p>
+                          <p className="text-[10px] text-slate-500">{dashboardEntryScopeCaption}</p>
                         </div>
                       </div>
                     </article>
@@ -1447,7 +1564,7 @@ export function DashboardPage({
                           <p className="text-lg font-bold tabular-nums leading-none text-slate-900">
                             {(viewerTotalWeight / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                           </p>
-                          <p className="text-[10px] text-slate-500">Visible scope</p>
+                          <p className="text-[10px] text-slate-500">{dashboardEntryScopeCaption}</p>
                         </div>
                       </div>
                     </article>
@@ -1461,7 +1578,7 @@ export function DashboardPage({
                           <p className="text-lg font-bold tabular-nums leading-none text-slate-900">
                             {viewerTotalWelding.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                           </p>
-                          <p className="text-[10px] text-slate-500">Visible scope</p>
+                          <p className="text-[10px] text-slate-500">{dashboardEntryScopeCaption}</p>
                         </div>
                       </div>
                     </article>
@@ -1510,8 +1627,8 @@ export function DashboardPage({
                     </article>
                   </section>
 
-                  <section className="grid grid-cols-1 gap-3 lg:grid-cols-12 lg:gap-5">
-                    <article className="flex min-h-80 flex-col rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)] lg:col-span-8">
+                  <section className="grid grid-cols-1 gap-3">
+                    <article className="flex min-h-80 flex-col rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)]">
                       <h3 className="mb-2 text-sm font-semibold text-slate-900">Project Summary</h3>
                       <p className="mb-2 text-[11px] text-slate-500">Read-only view of projects you can access.</p>
                       <div className="no-scrollbar min-h-0 min-w-0 flex-1 overflow-x-auto">
@@ -1580,11 +1697,6 @@ export function DashboardPage({
                       </p>
                     </article>
 
-                    <TonnageBarChartCard
-                      title="Tonnage Overview"
-                      plannedWeightKg={viewerTotalWeight}
-                      actualWeightKg={viewerWeightDonut.totalW}
-                    />
                   </section>
 
                   <section className="w-full">
@@ -1654,6 +1766,16 @@ export function DashboardPage({
                         </table>
                       </div>
                     </article>
+                  </section>
+
+                  <section className="w-full">
+                    <TonnageBarChartCard
+                      title="Tonnage Overview"
+                      plannedWeightKg={viewerTotalWeight}
+                      actualWeightKg={viewerWeightDonut.totalW}
+                      projectBars={viewerTonnageBreakdown.projectBars}
+                      materialBars={viewerTonnageBreakdown.materialBars}
+                    />
                   </section>
 
                   <section className="grid gap-3 md:grid-cols-3 md:gap-4">
@@ -1796,8 +1918,8 @@ export function DashboardPage({
                     </article>
                   </section>
 
-                  <section className="grid min-h-0 grid-cols-1 gap-3 lg:grid-cols-12 lg:gap-5">
-                    <article className="flex min-h-80 flex-col rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)] lg:col-span-8">
+                  <section className="grid min-h-0 grid-cols-1 gap-3">
+                    <article className="flex min-h-80 flex-col rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)]">
                       <h3 className="mb-2 text-sm font-semibold text-slate-900">Project Summary</h3>
                       <div className="no-scrollbar min-h-0 min-w-0 flex-1 overflow-x-auto">
                         <table className="w-full min-w-[520px] border-collapse text-left text-xs">
@@ -1865,11 +1987,6 @@ export function DashboardPage({
                       </p>
                     </article>
 
-                    <TonnageBarChartCard
-                      title="Tonnage Overview"
-                      plannedWeightKg={adminTotalWeight}
-                      actualWeightKg={adminWeightDonut.totalW}
-                    />
                   </section>
 
                   <section className="w-full">
@@ -1939,6 +2056,15 @@ export function DashboardPage({
                         </table>
                       </div>
                     </article>
+                  </section>
+                  <section className="w-full">
+                    <TonnageBarChartCard
+                      title="Tonnage Overview"
+                      plannedWeightKg={adminTotalWeight}
+                      actualWeightKg={adminWeightDonut.totalW}
+                      projectBars={adminTonnageBreakdown.projectBars}
+                      materialBars={adminTonnageBreakdown.materialBars}
+                    />
                   </section>
                   </div>
 
@@ -2123,8 +2249,8 @@ export function DashboardPage({
                         </div>
                         <div className="min-w-0 flex-1 space-y-1.5">
                           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">My Submissions</p>
-                          <p className="text-lg font-bold tabular-nums leading-none text-slate-900">{userSubmissionCount}</p>
-                          <p className="text-[10px] text-emerald-600">Your entries</p>
+                          <p className="text-lg font-bold tabular-nums leading-none text-slate-900">{dashboardUserSubmissionCount}</p>
+                          <p className="text-[10px] text-emerald-600">{dashboardEntryScopeCaption}</p>
                         </div>
                       </div>
                     </article>
@@ -2135,8 +2261,8 @@ export function DashboardPage({
                         </div>
                         <div className="min-w-0 flex-1 space-y-1.5">
                           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600">Latest Value</p>
-                          <p className="text-lg font-bold tabular-nums leading-none text-slate-900">{latestUserEntry?.value ?? '—'}</p>
-                          <p className="text-[10px] text-slate-500">Most recent entry</p>
+                          <p className="text-lg font-bold tabular-nums leading-none text-slate-900">{dashboardLatestUserEntry?.value ?? '—'}</p>
+                          <p className="text-[10px] text-slate-500">{dashboardEntryScopeCaption}</p>
                         </div>
                       </div>
                     </article>
@@ -2150,7 +2276,7 @@ export function DashboardPage({
                           <p className="text-lg font-bold tabular-nums leading-none text-slate-900">
                             {(userTotalWeight / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                           </p>
-                          <p className="text-[10px] text-slate-500">Across assigned projects</p>
+                          <p className="text-[10px] text-slate-500">{dashboardEntryScopeCaption}</p>
                         </div>
                       </div>
                     </article>
@@ -2164,7 +2290,7 @@ export function DashboardPage({
                           <p className="text-lg font-bold tabular-nums leading-none text-slate-900">
                             {userTotalWelding.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                           </p>
-                          <p className="text-[10px] text-slate-500">Across assigned projects</p>
+                          <p className="text-[10px] text-slate-500">{dashboardEntryScopeCaption}</p>
                         </div>
                       </div>
                     </article>
@@ -2213,8 +2339,8 @@ export function DashboardPage({
                     </article>
                   </section>
 
-                  <section className="grid grid-cols-1 gap-3 lg:grid-cols-12 lg:gap-5">
-                    <article className="flex min-h-80 flex-col rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)] lg:col-span-8">
+                  <section className="grid grid-cols-1 gap-3">
+                    <article className="flex min-h-80 flex-col rounded-xl border border-slate-200/90 bg-white p-3 shadow-[0_4px_14px_rgba(0,0,0,0.04)]">
                       <h3 className="mb-2 text-sm font-semibold text-slate-900">My Project Summary</h3>
                       <div className="no-scrollbar min-h-0 min-w-0 flex-1 overflow-x-auto">
                         <table className="w-full min-w-[520px] border-collapse text-left text-xs">
@@ -2282,13 +2408,6 @@ export function DashboardPage({
                       </p>
                     </article>
 
-                    <div className="lg:col-span-4">
-                      <TonnageBarChartCard
-                        title="My Tonnage Overview"
-                        plannedWeightKg={userTotalWeight}
-                        actualWeightKg={sumEntryWeightKg(filteredVisibleProjects.flatMap((p) => p.entries.filter((e) => e.user === loggedInUser.username)))}
-                      />
-                    </div>
                   </section>
 
                   <section className="w-full">
@@ -2358,6 +2477,16 @@ export function DashboardPage({
                         </table>
                       </div>
                     </article>
+                  </section>
+
+                  <section className="w-full">
+                    <TonnageBarChartCard
+                      title="My Tonnage Overview"
+                      plannedWeightKg={userTotalWeight}
+                      actualWeightKg={sumEntryWeightKg(rangeScopedVisibleProjects.flatMap((project) => project.entries))}
+                      projectBars={userTonnageBreakdown.projectBars}
+                      materialBars={userTonnageBreakdown.materialBars}
+                    />
                   </section>
 
                   <section className="grid gap-3 md:grid-cols-3 md:gap-4">

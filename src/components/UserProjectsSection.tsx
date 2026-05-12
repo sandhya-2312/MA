@@ -164,7 +164,7 @@ export function UserProjectsSection({
 
   const saveEditedEntry = () => {
     if (!selectedProject || editingEntryIndex === null) return;
-    if (!editingEntryForm.areaSection || !editingEntryForm.itemDetails) return;
+    if (!editingEntryForm.itemDetails) return;
     handleUpdateUserProjectEntry(selectedProject.id, editingEntryIndex, {
       ...editingEntryForm,
       projectType: editingEntryForm.projectType.trim() || 'Material Entry',
@@ -373,7 +373,7 @@ export function UserProjectsSection({
                             quantity: row.quantity,
                           }) > 0,
                       );
-                    if (!addEntryAreaSection.trim() || rowsToSubmit.length === 0) return;
+                    if (rowsToSubmit.length === 0) return;
                     for (const row of rowsToSubmit) {
                       await handleCreateUserProjectEntry({
                         projectId: selectedProject.id,
@@ -395,7 +395,6 @@ export function UserProjectsSection({
                     onChange={(event) => setAddEntryAreaSection(event.target.value)}
                     placeholder="Area / Section"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                    required
                   />
 
                   <ProjectMaterialRowsEditor
