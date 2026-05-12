@@ -12,12 +12,12 @@ A React + TypeScript dashboard built with Vite for managing projects, members, a
 
 ## Features
 
-- Role-based login flow
-- First-login password change
-- Project management (create, update, assign)
-- Member management with role and project assignment
-- User and viewer dashboard views
-- Submission tracking and trend visualizations
+- Production login at `/login` against the Render API with role-based access for Admin, User, and Viewer
+- First-login password change for new accounts before the main dashboard opens
+- Admin dashboard: project management (create, update, assign), member management, and admin project views
+- User dashboard: assigned project workflows and submission entry
+- Viewer dashboard: read-only access to assigned project data
+- Submission tracking and trend visualizations backed by production dashboard APIs
 - Tonnage comparison bar charts (`Total Tonnage` vs `Actual Tonnage`) on Dashboard and Project Summary
 - Project Summary actions:
   - Export report (CSV)
