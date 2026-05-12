@@ -1,4 +1,5 @@
-import { API_BASE_URL } from '../config/api.ts';
+import axios, { isAxiosError } from 'axios';
+import { buildApiUrl } from '../config/api.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -12,24 +13,13 @@ export class ApiError extends Error {
   }
 }
 
-type RequestOptions = RequestInit & {
+type RequestOptions = {
+  method?: string;
+  body?: string;
   token?: string;
   parseJson?: boolean;
+  responseType?: 'json' | 'blob' | 'text';
 };
-
-function buildHeaders(init: RequestInit | undefined, token?: string): Headers {
-  const headers = new Headers(init?.headers ?? undefined);
-  const hasBody = init?.body != null;
-  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
-
-  if (hasBody && !isFormData && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
-  }
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-  return headers;
-}
 
 function formatDetail(detail: unknown): string | undefined {
   if (typeof detail === 'string') return detail;
@@ -51,85 +41,104 @@ function formatDetail(detail: unknown): string | undefined {
   return undefined;
 }
 
-async function readErrorMessage(response: Response): Promise<{ message: string; detail: unknown }> {
-  const body = await response.json().catch(() => null);
-  if (body && typeof body === 'object') {
-    const detail = 'detail' in body ? (body as { detail?: unknown }).detail : body;
+function toApiError(error: unknown): ApiError {
+  if (error instanceof ApiError) return error;
+
+  if (isAxiosError(error)) {
+    const status = error.response?.status ?? 0;
+    const responseData = error.response?.data;
+    const detail =
+      responseData && typeof responseData === 'object' && 'detail' in responseData
+        ? (responseData as { detail?: unknown }).detail
+        : responseData;
     const message =
       formatDetail(detail) ??
-      (typeof (body as { message?: unknown }).message === 'string'
-        ? (body as { message: string }).message
-        : undefined) ??
-      (response.statusText || 'Request failed');
-    return { message, detail };
+      (typeof responseData === 'string' ? responseData : undefined) ??
+      error.message ??
+      'Request failed';
+    return new ApiError(message, status, detail);
   }
-  return {
-    message: response.statusText || 'Request failed',
-    detail: body,
-  };
-}
 
-function toNetworkError(error: unknown): ApiError {
-  if (error instanceof ApiError) return error;
-  if (error instanceof TypeError) {
-    return new ApiError(
-      'Unable to reach the API. Check your connection or try again after the server wakes up.',
-      0,
-    );
-  }
   if (error instanceof Error) {
     return new ApiError(error.message, 0);
   }
+
   return new ApiError('Request failed', 0);
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { token, parseJson = true, ...init } = options;
-  const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  const { token, parseJson = true, responseType = 'json', method = 'GET', body } = options;
+  const url = buildApiUrl(path);
+  const headers: Record<string, string> = {};
 
-  let response: Response;
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   try {
-    response = await fetch(url, {
-      ...init,
-      headers: buildHeaders(init, token),
+    const response = await axios.request<T>({
+      url,
+      method,
+      data: body ? JSON.parse(body) : undefined,
+      headers,
+      responseType: responseType === 'blob' ? 'blob' : responseType === 'text' ? 'text' : 'json',
+      validateStatus: () => true,
     });
+
+    if (response.status < 200 || response.status >= 300) {
+      const detail =
+        response.data && typeof response.data === 'object' && 'detail' in response.data
+          ? (response.data as { detail?: unknown }).detail
+          : response.data;
+      const message =
+        formatDetail(detail) ??
+        (typeof response.data === 'string' ? response.data : undefined) ??
+        (response.statusText || 'Request failed');
+      throw new ApiError(message, response.status, detail);
+    }
+
+    if (response.status === 204 || !parseJson) {
+      return undefined as T;
+    }
+
+    return response.data as T;
   } catch (error) {
-    throw toNetworkError(error);
+    throw toApiError(error);
   }
-
-  if (!response.ok) {
-    const { message, detail } = await readErrorMessage(response);
-    throw new ApiError(message, response.status, detail);
-  }
-
-  if (response.status === 204 || !parseJson) {
-    return undefined as T;
-  }
-
-  const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.includes('application/json')) {
-    return (await response.text()) as T;
-  }
-
-  return response.json() as Promise<T>;
 }
 
 export async function downloadAuthenticatedBlob(path: string, token: string): Promise<Blob> {
-  const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  const url = buildApiUrl(path);
 
-  let response: Response;
   try {
-    response = await fetch(url, {
-      headers: buildHeaders(undefined, token),
+    const response = await axios.get<Blob>(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'blob',
+      validateStatus: () => true,
     });
+
+    if (response.status < 200 || response.status >= 300) {
+      let detail: unknown = response.data;
+      if (response.data instanceof Blob) {
+        try {
+          detail = JSON.parse(await response.data.text());
+        } catch {
+          detail = undefined;
+        }
+      }
+      const message = formatDetail(
+        detail && typeof detail === 'object' && 'detail' in detail
+          ? (detail as { detail?: unknown }).detail
+          : detail,
+      ) ?? 'Request failed';
+      throw new ApiError(message, response.status, detail);
+    }
+
+    return response.data;
   } catch (error) {
-    throw toNetworkError(error);
+    throw toApiError(error);
   }
-
-  if (!response.ok) {
-    const { message, detail } = await readErrorMessage(response);
-    throw new ApiError(message, response.status, detail);
-  }
-
-  return response.blob();
 }
