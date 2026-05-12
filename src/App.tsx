@@ -5,8 +5,29 @@ import { FirstLoginSetupPage } from './components/FirstLoginSetupPage.tsx';
 import { LoginPage } from './components/LoginPage.tsx';
 import type { CreateProjectPayload } from './components/CreateProjectForm.tsx';
 import type { NavTab, Project, ProjectEntry, Role, UserAccount } from './types';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+import type { DashboardPointApi } from './services/dashboardApi.ts';
+import {
+  type ApiUserRow,
+  assignUserToProject,
+  createProject,
+  createProjectData,
+  createUser,
+  deleteProject,
+  deleteProjectData,
+  deleteUser,
+  exportProjectSummaryReport,
+  getAdminProjectsPage,
+  getAdminProjectsStats,
+  getBulkDashboardData,
+  getProfile,
+  listProjects,
+  listUsers,
+  login,
+  updateProfile,
+  updateProject,
+  updateProjectData,
+  updateUser,
+} from './services/index.ts';
 const SESSION_AUTH_KEY = 'ma_session_auth';
 const toNumber = (value: string) => Number.parseFloat(value) || 0;
 
@@ -104,41 +125,11 @@ function readStoredAuth(): SessionAuth | null {
   }
 }
 
-type ApiUserRow = {
-  id: number;
-  username: string;
-  role: Role;
-  first_login: boolean;
-  assigned_project_ids?: number[];
-  contact_no?: string | null;
-  full_name?: string | null;
-  email?: string | null;
-  designation?: string | null;
-};
-
 type AdminProjectsPageSummary = {
   totalProjects: number;
   totalEntries: number;
   activeMembers: number;
 };
-
-type DashboardPointApi = { id: number; timestamp: string; value: number; meta?: Record<string, unknown> | null };
-
-async function request<T>(path: string, init?: RequestInit, token?: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || 'Request failed');
-  }
-  return response.json() as Promise<T>;
-}
 
 function isFirstLoginRequiredError(error: unknown) {
   return error instanceof Error && /password change required on first login/i.test(error.message);
@@ -401,11 +392,7 @@ export default function App() {
   };
 
   const loadAdminProjectsPageSummary = async (token: string) => {
-    const stats = await request<{ total_projects: number; total_entries: number; active_members: number }>(
-      '/admin/projects/stats',
-      undefined,
-      token,
-    );
+    const stats = await getAdminProjectsStats(token);
     setAdminProjectsPageSummary({
       totalProjects: stats.total_projects,
       totalEntries: stats.total_entries,
@@ -422,29 +409,11 @@ export default function App() {
     try {
       if (role === 'Admin') {
         const search = options?.adminSearch !== undefined ? options.adminSearch : adminProjectSearch;
-        const adminProjects = await request<{
-          items: Array<{
-            id: number;
-            name: string;
-            parameters: Record<string, unknown> | null;
-          }>;
-          total: number;
-          page: number;
-          per_page: number;
-          search: string | null;
-        }>(
-          `/admin/projects?page=${adminProjectPage}&per_page=${adminProjectPerPage}&search=${encodeURIComponent(
-            search,
-          )}`,
-          undefined,
-          token,
-        );
+        const adminProjects = await getAdminProjectsPage(token, adminProjectPage, adminProjectPerPage, search);
         const projectItems = adminProjects.items;
 
         const projectIds = projectItems.map((project) => project.id);
-        const bulk = await request<{
-          items: Array<{ project_id: number; points: DashboardPointApi[] }>;
-        }>(`/dashboard-data/bulk?project_ids=${projectIds.join(',')}`, undefined, token);
+        const bulk = await getBulkDashboardData(token, projectIds);
         const pointsByProjectId = new Map<number, DashboardPointApi[]>(
           bulk.items.map((item) => [item.project_id, item.points]),
         );
@@ -486,13 +455,9 @@ export default function App() {
       }
 
       setAdminProjectsPageSummary(null);
-      let rawProjects = await request<Array<{ id: number; name: string; parameters: Record<string, unknown> | null }>>(
-        '/projects',
-        undefined,
-        token,
-      );
+      let rawProjects = await listProjects(token);
       try {
-        const rawProfile = await request<ApiUserRow>('/profile', undefined, token);
+        const rawProfile = await getProfile(token);
         const assigned = new Set(rawProfile.assigned_project_ids ?? []);
         rawProjects = rawProjects.filter((project) => assigned.has(project.id));
       } catch {
@@ -503,9 +468,10 @@ export default function App() {
         setProjects([]);
         return;
       }
-      const bulk = await request<{
-        items: Array<{ project_id: number; points: DashboardPointApi[] }>;
-      }>(`/dashboard-data/bulk?project_ids=${rawProjects.map((project) => project.id).join(',')}`, undefined, token);
+      const bulk = await getBulkDashboardData(
+        token,
+        rawProjects.map((project) => project.id),
+      );
       const pointsByProjectId = new Map<number, DashboardPointApi[]>(
         bulk.items.map((item) => [item.project_id, item.points]),
       );
@@ -546,13 +512,13 @@ export default function App() {
 
   const loadUsers = async (token: string, role: Role) => {
     if (role !== 'Admin') return;
-    const rawUsers = await request<Array<ApiUserRow>>('/users', undefined, token);
+    const rawUsers = await listUsers(token);
     setUsers(rawUsers.map((user) => mapUser(user)));
   };
 
   const refreshCurrentUserProfile = async (token: string) => {
     try {
-      const raw = await request<ApiUserRow>('/profile', undefined, token);
+      const raw = await getProfile(token);
       setCurrentUserProfile(mapUser(raw));
     } catch {
       setCurrentUserProfile(null);
@@ -579,15 +545,12 @@ export default function App() {
     const username = String(formData.get('username') ?? '').trim();
     const password = String(formData.get('password') ?? '').trim();
     try {
-      const login = await request<{ access_token: string; role: Role; first_login: boolean }>('/login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password }),
-      });
+      const loginResponse = await login(username, password);
       setAuth({
-        accessToken: login.access_token,
+        accessToken: loginResponse.access_token,
         username,
-        role: login.role,
-        firstLogin: login.first_login,
+        role: loginResponse.role,
+        firstLogin: loginResponse.first_login,
         contactNo: '',
       });
       setLoginError('');
@@ -626,21 +589,14 @@ export default function App() {
       return;
     }
     try {
-      const updated = await request<ApiUserRow>(
-        '/profile',
-        {
-          method: 'PUT',
-          body: JSON.stringify({
-            username,
-            new_password: newPassword,
-            contact_no: contactNo || null,
-            full_name: fullName,
-            email,
-            designation: designation || null,
-          }),
-        },
-        auth.accessToken,
-      );
+      const updated = await updateProfile(auth.accessToken, {
+        username,
+        new_password: newPassword,
+        contact_no: contactNo || null,
+        full_name: fullName,
+        email,
+        designation: designation || null,
+      });
       const mapped = mapUser(updated);
       setCurrentUserProfile(mapped);
       setAuth({
@@ -685,21 +641,14 @@ export default function App() {
       return;
     }
     try {
-      const updated = await request<ApiUserRow>(
-        '/profile',
-        {
-          method: 'PUT',
-          body: JSON.stringify({
-            username,
-            new_password: newPassword || null,
-            contact_no: contactNo || null,
-            full_name: fullName,
-            email,
-            designation: designation || null,
-          }),
-        },
-        auth.accessToken,
-      );
+      const updated = await updateProfile(auth.accessToken, {
+        username,
+        new_password: newPassword || null,
+        contact_no: contactNo || null,
+        full_name: fullName,
+        email,
+        designation: designation || null,
+      });
       const mapped = mapUser(updated);
       setCurrentUserProfile(mapped);
       setAuth((current) =>
@@ -748,24 +697,17 @@ export default function App() {
       return false;
     }
     try {
-      const created = await request<{ user: ApiUserRow; temporary_password: string | null }>(
-        '/users',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            username,
-            password,
-            role,
-            contact_no: contactNo || null,
-            full_name: fullName || null,
-            email: email || null,
-            designation: designation || null,
-          }),
-        },
-        auth.accessToken,
-      );
+      const created = await createUser(auth.accessToken, {
+        username,
+        password,
+        role,
+        contact_no: contactNo || null,
+        full_name: fullName || null,
+        email: email || null,
+        designation: designation || null,
+      });
       for (const projectId of projectIds) {
-        await request('/assign-user', { method: 'POST', body: JSON.stringify({ user_id: created.user.id, project_id: projectId }) }, auth.accessToken);
+        await assignUserToProject(auth.accessToken, created.user.id, projectId);
       }
       await loadUsers(auth.accessToken, auth.role);
       await loadAdminProjectsPageSummary(auth.accessToken);
@@ -782,7 +724,7 @@ export default function App() {
   const handleDeleteMember = async (memberId: number) => {
     if (!auth || auth.role !== 'Admin') return;
     try {
-      await request(`/users/${memberId}`, { method: 'DELETE' }, auth.accessToken);
+      await deleteUser(auth.accessToken, memberId);
       await loadUsers(auth.accessToken, auth.role);
       await loadAdminProjectsPageSummary(auth.accessToken);
       setStatus('Member deleted successfully.');
@@ -818,22 +760,15 @@ export default function App() {
       assignedOn: editAssignedOn,
     };
     try {
-      await request(
-        `/users/${memberId}`,
-        {
-          method: 'PUT',
-          body: JSON.stringify({
-            username: editUsername.trim(),
-            role: editRole,
-            project_ids: editProjectIds,
-            contact_no: clientFields.contactNo || null,
-            full_name: clientFields.fullName || null,
-            email: clientFields.email || null,
-            designation: clientFields.designation || null,
-          }),
-        },
-        auth.accessToken,
-      );
+      await updateUser(auth.accessToken, memberId, {
+        username: editUsername.trim(),
+        role: editRole,
+        project_ids: editProjectIds,
+        contact_no: clientFields.contactNo || null,
+        full_name: clientFields.fullName || null,
+        email: clientFields.email || null,
+        designation: clientFields.designation || null,
+      });
       await loadUsers(auth.accessToken, auth.role);
       await loadAdminProjectsPageSummary(auth.accessToken);
       setEditingMemberId(null);
@@ -872,7 +807,7 @@ export default function App() {
       })),
     };
     try {
-      await request('/projects', { method: 'POST', body: JSON.stringify(body) }, auth.accessToken);
+      await createProject(auth.accessToken, body);
       await loadProjectsWithData(auth.accessToken, auth.username, auth.role);
       setShowProjectCreateForm(false);
       setStatus(
@@ -890,26 +825,19 @@ export default function App() {
   const handleUpdateProject = async (projectId: number, payload: CreateProjectPayload): Promise<boolean> => {
     if (!auth || auth.role !== 'Admin') return false;
     try {
-      await request(
-        `/projects/${projectId}`,
-        {
-          method: 'PUT',
-          body: JSON.stringify({
-            name: payload.name,
-            parameters: {
-              description: payload.description,
-              parameter: payload.parameter ?? '',
-              projectKind: payload.projectKind,
-              projectStatus: payload.projectStatus,
-              location: payload.location ?? '',
-              dateOfCommitment: payload.dateOfCommitment ?? '',
-              plannedFinishDate: payload.plannedFinishDate ?? '',
-              materials: payload.materials ?? [],
-            },
-          }),
+      await updateProject(auth.accessToken, projectId, {
+        name: payload.name,
+        parameters: {
+          description: payload.description,
+          parameter: payload.parameter ?? '',
+          projectKind: payload.projectKind,
+          projectStatus: payload.projectStatus,
+          location: payload.location ?? '',
+          dateOfCommitment: payload.dateOfCommitment ?? '',
+          plannedFinishDate: payload.plannedFinishDate ?? '',
+          materials: payload.materials ?? [],
         },
-        auth.accessToken,
-      );
+      });
       await loadProjectsWithData(auth.accessToken, auth.username, auth.role);
       setStatus(`Project "${payload.name}" updated.`);
       return true;
@@ -922,7 +850,7 @@ export default function App() {
   const handleDeleteProject = async (projectId: number) => {
     if (!auth || auth.role !== 'Admin') return;
     try {
-      await request(`/projects/${projectId}`, { method: 'DELETE' }, auth.accessToken);
+      await deleteProject(auth.accessToken, projectId);
       await loadProjectsWithData(auth.accessToken, auth.username, auth.role);
       setStatus('Project deleted successfully.');
     } catch (error) {
@@ -957,32 +885,25 @@ export default function App() {
     const computedWeight = computedWeightValue.toFixed(2);
     if (!projectId) return;
     try {
-      await request(
-        '/data',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            project_id: projectId,
-            value: Number.parseFloat(computedWeight) || 0,
-            meta: {
-              user: loggedInUser.username,
-              projectType: 'Material Entry',
-              areaSection,
-              itemDetails,
-              dimensions,
-              lengthMm,
-              widthMm,
-              thkDia,
-              densityKgM3,
-              qty,
-              weight: computedWeight,
-              weldingMeters: payload.weldingMeters.trim(),
-              remarks: payload.remarks.trim(),
-            },
-          }),
+      await createProjectData(auth.accessToken, {
+        project_id: projectId,
+        value: Number.parseFloat(computedWeight) || 0,
+        meta: {
+          user: loggedInUser.username,
+          projectType: 'Material Entry',
+          areaSection,
+          itemDetails,
+          dimensions,
+          lengthMm,
+          widthMm,
+          thkDia,
+          densityKgM3,
+          qty,
+          weight: computedWeight,
+          weldingMeters: payload.weldingMeters.trim(),
+          remarks: payload.remarks.trim(),
         },
-        auth.accessToken,
-      );
+      });
       await loadProjectsWithData(auth.accessToken, auth.username, auth.role);
       setStatus(`Data submitted for ${itemDetails || areaSection || 'project'}.`);
     } catch (error) {
@@ -1023,14 +944,10 @@ export default function App() {
       remarks: updates.remarks,
     };
     try {
-      await request(
-        `/data/${entry.dataId}`,
-        {
-          method: 'PUT',
-          body: JSON.stringify({ value: Number.parseFloat(updatedWeight) || 0, meta }),
-        },
-        auth.accessToken,
-      );
+      await updateProjectData(auth.accessToken, entry.dataId, {
+        value: Number.parseFloat(updatedWeight) || 0,
+        meta,
+      });
       await loadProjectsWithData(auth.accessToken, auth.username, auth.role);
       setStatus('Project entry updated.');
     } catch (error) {
@@ -1041,7 +958,7 @@ export default function App() {
   const handleDeleteUserProjectEntry = async (projectId: number, dataId: number) => {
     if (!auth) return;
     try {
-      await request(`/data/${dataId}`, { method: 'DELETE' }, auth.accessToken);
+      await deleteProjectData(auth.accessToken, dataId);
       await loadProjectsWithData(auth.accessToken, auth.username, auth.role);
       setStatus('Project entry deleted.');
       if (summaryProjectId === projectId) {
@@ -1055,14 +972,7 @@ export default function App() {
   const handleExportProjectReport = async (projectId: number) => {
     if (!auth) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/reports/project/${projectId}/summary`, {
-        headers: { Authorization: `Bearer ${auth.accessToken}` },
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.detail || 'Failed to export report');
-      }
-      const blob = await response.blob();
+      const blob = await exportProjectSummaryReport(auth.accessToken, projectId);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
