@@ -1,0 +1,16 @@
+# Netlify settings for the Vite React frontend.
+# Monorepo layout: set base = "client" and keep publish = "dist".
+# This repo uses the repository root as the frontend app root.
+
+[build]
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--no-audit --no-fund"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
