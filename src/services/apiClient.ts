@@ -69,7 +69,9 @@ function toApiError(error: unknown): ApiError {
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { token, parseJson = true, responseType = 'json', method = 'GET', body } = options;
   const url = buildApiUrl(path);
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
 
   if (body) {
     headers['Content-Type'] = 'application/json';

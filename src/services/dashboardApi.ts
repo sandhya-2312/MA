@@ -1,3 +1,4 @@
+import { API_ENDPOINTS } from '../config/endpoints.ts';
 import { apiRequest } from './apiClient.ts';
 
 export type DashboardPointApi = {
@@ -29,8 +30,17 @@ export type AdminProjectsPageResponse = {
   search: string | null;
 };
 
+export type AdminProjectDetailResponse = {
+  id: number;
+  name: string;
+  parameters: Record<string, unknown> | null;
+  total_entries: number;
+  assigned_users: Array<{ id: number; username: string; role: string }>;
+  points: DashboardPointApi[];
+};
+
 export function getAdminProjectsStats(token: string) {
-  return apiRequest<AdminProjectsStatsResponse>('/admin/projects/stats', { token });
+  return apiRequest<AdminProjectsStatsResponse>(API_ENDPOINTS.adminProjectsStats, { token });
 }
 
 export function getAdminProjectsPage(
@@ -44,12 +54,31 @@ export function getAdminProjectsPage(
     per_page: String(perPage),
     search,
   });
-  return apiRequest<AdminProjectsPageResponse>(`/admin/projects?${query.toString()}`, { token });
+  return apiRequest<AdminProjectsPageResponse>(`${API_ENDPOINTS.adminProjects}?${query.toString()}`, { token });
+}
+
+export function getAdminProjectDetail(token: string, projectId: number) {
+  return apiRequest<AdminProjectDetailResponse>(API_ENDPOINTS.adminProject(projectId), { token });
 }
 
 export function getBulkDashboardData(token: string, projectIds: number[]) {
   const query = new URLSearchParams({
     project_ids: projectIds.join(','),
   });
-  return apiRequest<BulkDashboardDataResponse>(`/dashboard-data/bulk?${query.toString()}`, { token });
+  return apiRequest<BulkDashboardDataResponse>(`${API_ENDPOINTS.dashboardDataBulk}?${query.toString()}`, { token });
+}
+
+export function getDashboardData(token: string, projectId: number, fromDate?: string, toDate?: string) {
+  const query = new URLSearchParams({ project_id: String(projectId) });
+  if (fromDate) query.set('from_date', fromDate);
+  if (toDate) query.set('to_date', toDate);
+  return apiRequest<{
+    project_id: number;
+    project_name: string;
+    points: DashboardPointApi[];
+  }>(`${API_ENDPOINTS.dashboardData}?${query.toString()}`, { token });
+}
+
+export function getHealth() {
+  return apiRequest<{ status: string; database?: string; data?: Record<string, number> }>(API_ENDPOINTS.health);
 }

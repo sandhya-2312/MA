@@ -601,6 +601,7 @@ export default function App() {
       setCurrentUserProfile(mapped);
       setAuth({
         ...auth,
+        accessToken: updated.access_token ?? auth.accessToken,
         username: updated.username,
         firstLogin: updated.first_login,
         contactNo: updated.contact_no ?? '',
@@ -655,6 +656,7 @@ export default function App() {
         current
           ? {
               ...current,
+              accessToken: updated.access_token ?? current.accessToken,
               username: updated.username,
               firstLogin: updated.first_login,
               contactNo: updated.contact_no ?? '',
