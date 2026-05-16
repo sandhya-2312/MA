@@ -1,9 +1,17 @@
 import type { FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { Project, ProjectEntry, UserAccount } from '../types';
+import { deleteIconButtonClass, editIconButtonClass, IconPencil, IconTrash } from './actionIcons';
+import { EntryDimensionTd } from './EntryDimensionCells';
 import {
   buildInitialValuesFromProject,
   computeStoredMaterialWeightKg,
+  entryBarLengthMm,
+  entryToMaterialPayload,
+  formatEntryWeightKg,
+  getEntryDimensionCells,
+  materialPayloadToEntryFields,
+  validateMaterialPayload,
   CreateProjectForm,
   emptyMaterial,
   formatPrimaryMaterialCardLine,
@@ -14,6 +22,10 @@ import {
   type CreateProjectPayload,
   type ProjectMaterialPayload,
 } from './CreateProjectForm';
+
+const entryLabelClass = 'mb-1 block text-xs font-medium text-slate-600';
+const entryInputClass =
+  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2';
 
 function IconProjectsStat({ className = 'h-7 w-7' }: { className?: string }) {
   return (
@@ -46,16 +58,17 @@ type UserProjectsSectionProps = {
     entryIndex: number,
     updates: Pick<
       ProjectEntry,
-      'projectType' | 'areaSection' | 'itemDetails' | 'lengthMm' | 'widthMm' | 'thkDia' | 'densityKgM3' | 'qty' | 'weldingMeters' | 'remarks'
+      'projectType' | 'areaSection' | 'itemDetails' | 'lengthMm' | 'widthMm' | 'thkDia' | 'barLengthMm' | 'densityKgM3' | 'qty' | 'weldingMeters' | 'remarks'
     >,
   ) => void;
+  handleDeleteUserProjectEntry: (projectId: number, dataId: number) => Promise<void>;
   requestedProjectId?: number | null;
   onRequestedProjectHandled?: () => void;
 };
 
 type EditableEntry = Pick<
   ProjectEntry,
-  'projectType' | 'areaSection' | 'itemDetails' | 'lengthMm' | 'widthMm' | 'thkDia' | 'densityKgM3' | 'qty' | 'weldingMeters' | 'remarks'
+  'projectType' | 'areaSection' | 'itemDetails' | 'lengthMm' | 'widthMm' | 'thkDia' | 'barLengthMm' | 'densityKgM3' | 'qty' | 'weldingMeters' | 'remarks'
 >;
 
 const emptyEditableEntry: EditableEntry = {
@@ -65,6 +78,7 @@ const emptyEditableEntry: EditableEntry = {
   lengthMm: '',
   widthMm: '',
   thkDia: '',
+  barLengthMm: '',
   densityKgM3: '',
   qty: '',
   weldingMeters: '',
@@ -78,6 +92,7 @@ export function UserProjectsSection({
   handleCreateUserProjectEntry,
   handleUpdateProject,
   handleUpdateUserProjectEntry,
+  handleDeleteUserProjectEntry,
   requestedProjectId,
   onRequestedProjectHandled,
 }: UserProjectsSectionProps) {
@@ -86,6 +101,9 @@ export function UserProjectsSection({
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
   const [editingEntryForm, setEditingEntryForm] = useState<EditableEntry>(emptyEditableEntry);
+  const [editingEntryMaterial, setEditingEntryMaterial] = useState<ProjectMaterialPayload | null>(null);
+  const [editEntryError, setEditEntryError] = useState('');
+  const [addEntryError, setAddEntryError] = useState('');
   const [editProjectModalOpen, setEditProjectModalOpen] = useState(false);
   const [addEntryModalOpen, setAddEntryModalOpen] = useState(false);
   const [addEntryAreaSection, setAddEntryAreaSection] = useState('');
@@ -95,6 +113,7 @@ export function UserProjectsSection({
   const [projectSearchInput, setProjectSearchInput] = useState('');
   const [projectSearchApplied, setProjectSearchApplied] = useState('');
   const [projectStatusFilter, setProjectStatusFilter] = useState<string>('All');
+  const [pendingDeleteEntry, setPendingDeleteEntry] = useState<{ entry: ProjectEntry; index: number } | null>(null);
 
   const filteredVisibleProjects = useMemo(() => {
     const q = projectSearchApplied.trim().toLowerCase();
@@ -143,6 +162,8 @@ export function UserProjectsSection({
     const sourceEntry = selectedProject.entries[entryIndex];
     if (!sourceEntry) return;
     setEditingEntryIndex(entryIndex);
+    setEditEntryError('');
+    setEditingEntryMaterial(entryToMaterialPayload(sourceEntry));
     setEditingEntryForm({
       projectType: sourceEntry.projectType || 'Material Entry',
       areaSection: sourceEntry.areaSection,
@@ -150,7 +171,8 @@ export function UserProjectsSection({
       lengthMm: sourceEntry.lengthMm,
       widthMm: sourceEntry.widthMm,
       thkDia: sourceEntry.thkDia,
-      densityKgM3: sourceEntry.densityKgM3,
+      barLengthMm: entryBarLengthMm(sourceEntry),
+      densityKgM3: sourceEntry.densityKgM3 || '7850',
       qty: sourceEntry.qty,
       weldingMeters: sourceEntry.weldingMeters,
       remarks: sourceEntry.remarks,
@@ -160,16 +182,41 @@ export function UserProjectsSection({
   const cancelEditEntry = () => {
     setEditingEntryIndex(null);
     setEditingEntryForm(emptyEditableEntry);
+    setEditingEntryMaterial(null);
+    setEditEntryError('');
   };
 
   const saveEditedEntry = () => {
-    if (!selectedProject || editingEntryIndex === null) return;
-    if (!editingEntryForm.itemDetails) return;
+    if (!selectedProject || editingEntryIndex === null || !editingEntryMaterial) return;
+    const validation = validateMaterialPayload(editingEntryMaterial);
+    if (!validation.valid) {
+      setEditEntryError(validation.errors.join(' '));
+      return;
+    }
+    const fields = materialPayloadToEntryFields(editingEntryMaterial);
     handleUpdateUserProjectEntry(selectedProject.id, editingEntryIndex, {
-      ...editingEntryForm,
       projectType: editingEntryForm.projectType.trim() || 'Material Entry',
+      areaSection: editingEntryForm.areaSection,
+      itemDetails: fields.itemDetails,
+      lengthMm: fields.lengthMm,
+      widthMm: fields.widthMm,
+      thkDia: fields.thkDia,
+      barLengthMm: fields.barLengthMm,
+      densityKgM3: editingEntryForm.densityKgM3.trim() || '7850',
+      qty: fields.qty,
+      weldingMeters: editingEntryForm.weldingMeters,
+      remarks: editingEntryForm.remarks,
     });
     cancelEditEntry();
+  };
+
+  const confirmDeleteEntry = async () => {
+    if (!selectedProject || !pendingDeleteEntry?.entry.dataId) return;
+    await handleDeleteUserProjectEntry(selectedProject.id, pendingDeleteEntry.entry.dataId);
+    if (editingEntryIndex === pendingDeleteEntry.index) {
+      cancelEditEntry();
+    }
+    setPendingDeleteEntry(null);
   };
 
   const resetAddEntryForm = () => {
@@ -177,6 +224,7 @@ export function UserProjectsSection({
     setAddEntryWeldingMeters('');
     setAddEntryRemarks('');
     setAddEntryMaterials([emptyMaterial()]);
+    setAddEntryError('');
   };
 
   useEffect(() => {
@@ -351,29 +399,27 @@ export function UserProjectsSection({
                 <form
                   onSubmit={async (event) => {
                     event.preventDefault();
-                    const rowsToSubmit = addEntryMaterials
-                      .map((material) => {
-                        const materialName =
-                          material.materialType === 'Add manually'
-                            ? material.customMaterialName.trim() || 'Custom Material'
-                            : material.materialType;
-                        const dimensions = materialToDimensions(material);
-                        const quantity = material.quantity.trim();
-                        return { materialName, dimensions, quantity };
-                      })
-                      .filter(
-                        (row) =>
-                          row.materialName &&
-                          row.dimensions &&
-                          row.quantity &&
-                          Number.parseFloat(row.quantity) > 0 &&
-                          computeStoredMaterialWeightKg({
-                            name: row.materialName,
-                            dimensions: row.dimensions,
-                            quantity: row.quantity,
-                          }) > 0,
-                      );
-                    if (rowsToSubmit.length === 0) return;
+                    setAddEntryError('');
+                    const rowsToSubmit: Array<{ materialName: string; dimensions: string; quantity: string }> = [];
+                    for (const material of addEntryMaterials) {
+                      const materialName =
+                        material.materialType === 'Add manually'
+                          ? material.customMaterialName.trim() || 'Custom Material'
+                          : material.materialType;
+                      const dimensions = materialToDimensions(material).trim();
+                      const quantity = material.quantity.trim();
+                      if (!materialName && !dimensions) continue;
+                      const validation = validateMaterialPayload(material);
+                      if (!validation.valid) {
+                        setAddEntryError(validation.errors.join(' '));
+                        return;
+                      }
+                      rowsToSubmit.push({ materialName, dimensions, quantity });
+                    }
+                    if (rowsToSubmit.length === 0) {
+                      setAddEntryError('Add at least one material with valid dimensions.');
+                      return;
+                    }
                     for (const row of rowsToSubmit) {
                       await handleCreateUserProjectEntry({
                         projectId: selectedProject.id,
@@ -390,12 +436,18 @@ export function UserProjectsSection({
                   }}
                   className="space-y-3"
                 >
-                  <input
-                    value={addEntryAreaSection}
-                    onChange={(event) => setAddEntryAreaSection(event.target.value)}
-                    placeholder="Area / Section"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                  />
+                  <div>
+                    <label className={entryLabelClass} htmlFor="add-entry-area">
+                      Area / Section
+                    </label>
+                    <input
+                      id="add-entry-area"
+                      value={addEntryAreaSection}
+                      onChange={(event) => setAddEntryAreaSection(event.target.value)}
+                      placeholder="e.g. FWD - Bottom Area"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
+                    />
+                  </div>
 
                   <ProjectMaterialRowsEditor
                     materials={addEntryMaterials}
@@ -404,20 +456,33 @@ export function UserProjectsSection({
                     embedded
                     showTotalFooter={false}
                   />
+                  {addEntryError ? <p className="text-sm font-medium text-rose-600">{addEntryError}</p> : null}
 
                   <div className="grid gap-3 md:grid-cols-3">
-                    <input
-                      value={addEntryWeldingMeters}
-                      onChange={(event) => setAddEntryWeldingMeters(event.target.value)}
-                      placeholder="Welding Meters"
-                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                    />
-                    <input
-                      value={addEntryRemarks}
-                      onChange={(event) => setAddEntryRemarks(event.target.value)}
-                      placeholder="Remarks"
-                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2 md:col-span-2"
-                    />
+                    <div>
+                      <label className={entryLabelClass} htmlFor="add-entry-welding">
+                        Welding (m)
+                      </label>
+                      <input
+                        id="add-entry-welding"
+                        value={addEntryWeldingMeters}
+                        onChange={(event) => setAddEntryWeldingMeters(event.target.value)}
+                        placeholder="Welding length in meters"
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className={entryLabelClass} htmlFor="add-entry-remarks">
+                        Remarks
+                      </label>
+                      <input
+                        id="add-entry-remarks"
+                        value={addEntryRemarks}
+                        onChange={(event) => setAddEntryRemarks(event.target.value)}
+                        placeholder="Optional notes"
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
+                      />
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <button className="rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700">
@@ -484,52 +549,74 @@ export function UserProjectsSection({
           )}
 
           <div className="no-scrollbar mt-4 overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-full text-left text-xs md:text-sm">
-              <thead className="bg-slate-100 text-slate-700">
+            <table className="min-w-[960px] w-full text-left text-xs md:text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-100 text-slate-700 shadow-sm">
                 <tr>
-                  <th className="px-3 py-2 font-semibold">Date</th>
-                  <th className="px-3 py-2 font-semibold">Area/Section</th>
-                  <th className="px-3 py-2 font-semibold">Item</th>
-                  <th className="px-3 py-2 font-semibold">Qty</th>
-                  <th className="px-3 py-2 font-semibold">L (mm)</th>
-                  <th className="px-3 py-2 font-semibold">W (mm)</th>
-                  <th className="px-3 py-2 font-semibold">Thk/Dia</th>
-                  <th className="px-3 py-2 font-semibold">Density</th>
-                  <th className="px-3 py-2 font-semibold">Weight (kg)</th>
-                  <th className="px-3 py-2 font-semibold">Welding Meters</th>
-                  <th className="px-3 py-2 font-semibold">Remarks</th>
-                  {!isViewer && <th className="px-3 py-2 font-semibold">Actions</th>}
+                  <th className="px-3 py-2.5 font-semibold">Date</th>
+                  <th className="px-3 py-2.5 font-semibold">Area/Section</th>
+                  <th className="px-3 py-2.5 font-semibold">Item</th>
+                  <th className="px-3 py-2.5 text-center font-semibold">Qty</th>
+                  <th className="px-3 py-2.5 font-semibold">Dim 1 (mm)</th>
+                  <th className="px-3 py-2.5 font-semibold">Dim 2 (mm)</th>
+                  <th className="px-3 py-2.5 font-semibold">Dim 3 (mm)</th>
+                  <th className="px-3 py-2.5 font-semibold">Dim 4 (mm)</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Weight (kg)</th>
+                  <th className="px-3 py-2.5 font-semibold">Welding (m)</th>
+                  <th className="px-3 py-2.5 font-semibold">Remarks</th>
+                  {!isViewer && <th className="px-3 py-2.5 text-center font-semibold">Actions</th>}
                 </tr>
               </thead>
-              <tbody className="bg-white text-slate-700">
-                {selectedProjectEntriesWithIndex.map(({ entry, index }) => (
-                  <tr key={`${entry.createdAt}-${index}`} className="border-t border-slate-200">
-                    <td className="px-3 py-2">{entry.createdAt}</td>
-                    <td className="px-3 py-2">{entry.areaSection || '-'}</td>
-                    <td className="px-3 py-2">{entry.itemDetails || '-'}</td>
-                    <td className="px-3 py-2">{entry.qty || '-'}</td>
-                    <td className="px-3 py-2">{entry.lengthMm || '-'}</td>
-                    <td className="px-3 py-2">{entry.widthMm || '-'}</td>
-                    <td className="px-3 py-2">{entry.thkDia || '-'}</td>
-                    <td className="px-3 py-2">{entry.densityKgM3 || '-'}</td>
-                    <td className="px-3 py-2">{entry.weight || '-'}</td>
-                    <td className="px-3 py-2">{entry.weldingMeters || '-'}</td>
-                    <td className="px-3 py-2">{entry.remarks || '-'}</td>
+              <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                {selectedProjectEntriesWithIndex.map(({ entry, index }) => {
+                  const [d1, d2, d3, d4] = getEntryDimensionCells(entry);
+                  return (
+                  <tr key={`${entry.createdAt}-${index}`} className="transition hover:bg-slate-50/80">
+                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{entry.createdAt}</td>
+                    <td className="max-w-[140px] px-3 py-2.5">{entry.areaSection || '—'}</td>
+                    <td className="px-3 py-2.5 font-medium text-slate-800">{entry.itemDetails || '—'}</td>
+                    <td className="px-3 py-2.5 text-center tabular-nums">{entry.qty || '—'}</td>
+                    <EntryDimensionTd cell={d1} />
+                    <EntryDimensionTd cell={d2} />
+                    <EntryDimensionTd cell={d3} />
+                    <EntryDimensionTd cell={d4} />
+                    <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-teal-800">
+                      {formatEntryWeightKg(entry)}
+                    </td>
+                    <td className="px-3 py-2.5 tabular-nums">{entry.weldingMeters || '—'}</td>
+                    <td className="max-w-[120px] truncate px-3 py-2.5" title={entry.remarks}>
+                      {entry.remarks || '—'}
+                    </td>
                     {!isViewer && (
                       <td className="px-3 py-2">
-                        <button
-                          onClick={() => startEditEntry(index)}
-                          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                        >
-                          Edit
-                        </button>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => startEditEntry(index)}
+                            title="Edit entry"
+                            aria-label="Edit entry"
+                            className={editIconButtonClass}
+                          >
+                            <IconPencil />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPendingDeleteEntry({ entry, index })}
+                            disabled={entry.dataId == null}
+                            title={entry.dataId == null ? 'This entry cannot be deleted' : 'Delete entry'}
+                            aria-label="Delete entry"
+                            className={deleteIconButtonClass}
+                          >
+                            <IconTrash />
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
                 {selectedProjectEntriesWithIndex.length === 0 && (
                   <tr>
-                    <td colSpan={isViewer ? 11 : 12} className="px-3 py-3 text-center text-slate-500">
+                    <td colSpan={isViewer ? 11 : 12} className="px-3 py-8 text-center text-slate-500">
                       No submissions yet for this project.
                     </td>
                   </tr>
@@ -541,67 +628,59 @@ export function UserProjectsSection({
           {!isViewer && editingEntryIndex !== null && (
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h4 className="mb-3 text-base font-semibold text-slate-800">Edit Project Entry</h4>
-              <p className="mb-3 text-sm text-slate-500">Update line entry fields to match Add Entry.</p>
-              <div className="grid gap-3 md:grid-cols-4">
-                <input
-                  value={editingEntryForm.areaSection}
-                  onChange={(event) => setEditingEntryForm((current) => ({ ...current, areaSection: event.target.value }))}
-                  placeholder="Area / Section"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                />
-                <input
-                  value={editingEntryForm.itemDetails}
-                  onChange={(event) => setEditingEntryForm((current) => ({ ...current, itemDetails: event.target.value }))}
-                  placeholder="Item Details"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                />
-                <input
-                  value={editingEntryForm.qty}
-                  onChange={(event) => setEditingEntryForm((current) => ({ ...current, qty: event.target.value }))}
-                  placeholder="Qty"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                />
-                <input
-                  value={editingEntryForm.lengthMm}
-                  onChange={(event) => setEditingEntryForm((current) => ({ ...current, lengthMm: event.target.value }))}
-                  placeholder="L (mm)"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                />
-                <input
-                  value={editingEntryForm.widthMm}
-                  onChange={(event) => setEditingEntryForm((current) => ({ ...current, widthMm: event.target.value }))}
-                  placeholder="W (mm)"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                />
-                <input
-                  value={editingEntryForm.thkDia}
-                  onChange={(event) => setEditingEntryForm((current) => ({ ...current, thkDia: event.target.value }))}
-                  placeholder="Thk / Dia"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                />
-                <input
-                  value={editingEntryForm.densityKgM3}
-                  onChange={(event) =>
-                    setEditingEntryForm((current) => ({ ...current, densityKgM3: event.target.value }))
-                  }
-                  placeholder="Density (kg/m3)"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                />
-                <input
-                  value={editingEntryForm.weldingMeters}
-                  onChange={(event) =>
-                    setEditingEntryForm((current) => ({ ...current, weldingMeters: event.target.value }))
-                  }
-                  placeholder="Welding Meters"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                />
-                <input
-                  value={editingEntryForm.remarks}
-                  onChange={(event) => setEditingEntryForm((current) => ({ ...current, remarks: event.target.value }))}
-                  placeholder="Remarks"
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2 md:col-span-3"
-                />
+              <p className="mb-3 text-sm text-slate-500">
+                Dimensions use mm; weight recalculates instantly per material formula (7850 kg/m³).
+              </p>
+              {editEntryError ? <p className="mb-3 text-sm font-medium text-rose-600">{editEntryError}</p> : null}
+              <div className="mb-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={entryLabelClass} htmlFor="edit-entry-area">
+                    Area / Section
+                  </label>
+                  <input
+                    id="edit-entry-area"
+                    value={editingEntryForm.areaSection}
+                    onChange={(event) => setEditingEntryForm((current) => ({ ...current, areaSection: event.target.value }))}
+                    placeholder="e.g. FWD - Bottom Area"
+                    className={entryInputClass}
+                  />
+                </div>
+                <div>
+                  <label className={entryLabelClass} htmlFor="edit-entry-welding">
+                    Welding (m)
+                  </label>
+                  <input
+                    id="edit-entry-welding"
+                    value={editingEntryForm.weldingMeters}
+                    onChange={(event) =>
+                      setEditingEntryForm((current) => ({ ...current, weldingMeters: event.target.value }))
+                    }
+                    placeholder="Welding length in meters"
+                    className={entryInputClass}
+                  />
+                </div>
+                <div className="sm:col-span-2 lg:col-span-4">
+                  <label className={entryLabelClass} htmlFor="edit-entry-remarks">
+                    Remarks
+                  </label>
+                  <input
+                    id="edit-entry-remarks"
+                    value={editingEntryForm.remarks}
+                    onChange={(event) => setEditingEntryForm((current) => ({ ...current, remarks: event.target.value }))}
+                    placeholder="Optional notes"
+                    className={entryInputClass}
+                  />
+                </div>
               </div>
+              {editingEntryMaterial ? (
+                <ProjectMaterialRowsEditor
+                  materials={[editingEntryMaterial]}
+                  onMaterialsChange={(next) => setEditingEntryMaterial(next[0] ?? emptyMaterial())}
+                  containerClassName="mb-4 rounded-xl border border-slate-200 bg-white p-4"
+                  embedded
+                  showTotalFooter={false}
+                />
+              ) : null}
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={saveEditedEntry}
@@ -615,6 +694,48 @@ export function UserProjectsSection({
                 >
                   Cancel
                 </button>
+              </div>
+            </div>
+          )}
+
+          {pendingDeleteEntry && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="confirm-delete-entry-title"
+              className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4"
+              onClick={() => setPendingDeleteEntry(null)}
+            >
+              <div
+                className="w-full max-w-lg rounded-xl border border-slate-200/90 bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.35)]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <h3 id="confirm-delete-entry-title" className="text-xl font-bold text-slate-900">
+                  Delete entry
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                  Delete this line entry
+                  {pendingDeleteEntry.entry.itemDetails.trim()
+                    ? ` (${pendingDeleteEntry.entry.itemDetails.trim()})`
+                    : ''}
+                  ? This cannot be undone.
+                </p>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteEntry(null)}
+                    className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmDeleteEntry()}
+                    className="rounded-md bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
+                  >
+                    Delete entry
+                  </button>
+                </div>
               </div>
             </div>
           )}

@@ -4,6 +4,14 @@ import { DashboardPage } from './components/DashboardPage.tsx';
 import { FirstLoginSetupPage } from './components/FirstLoginSetupPage.tsx';
 import { LoginPage } from './components/LoginPage.tsx';
 import type { CreateProjectPayload } from './components/CreateProjectForm.tsx';
+import {
+  buildEntryDimensionsFromFields,
+  computeEntryWeightKg,
+  entryBarLengthMm,
+  isMsAngleMaterialName,
+  materialFromStored,
+  validateMaterialPayload,
+} from './components/CreateProjectForm.tsx';
 import type { NavTab, Project, ProjectEntry, Role, UserAccount } from './types';
 import type { DashboardPointApi } from './services/dashboardApi.ts';
 import {
@@ -29,8 +37,6 @@ import {
   updateUser,
 } from './services/index.ts';
 const SESSION_AUTH_KEY = 'ma_session_auth';
-const toNumber = (value: string) => Number.parseFloat(value) || 0;
-
 function getPathState(pathname: string): { tab: NavTab; summaryProjectId: number | null } {
   const clean = pathname.trim().toLowerCase();
   if (clean === '/projects' || clean === '/projects/') return { tab: 'projects', summaryProjectId: null };
@@ -57,35 +63,6 @@ function getPathForState(activeTab: NavTab, summaryProjectId: number | null): st
 function parseDimensionParts(raw: string): number[] {
   const matches = raw.match(/-?\d+(?:\.\d+)?/g) ?? [];
   return matches.map((part) => Number.parseFloat(part)).filter((value) => Number.isFinite(value) && value > 0);
-}
-
-function computeMaterialWeightFromDimensions(materialName: string, dimensions: string, quantity: string): number {
-  const qty = Math.max(Number.parseFloat(quantity) || 0, 0);
-  if (!qty) return 0;
-  const dims = parseDimensionParts(dimensions);
-  if (dims.length < 2) return 0;
-  const name = materialName.toLowerCase();
-  const density = 7850;
-  const pi = Math.PI;
-  let volumeMm3 = 0;
-  if (name.includes('pipe') && dims.length >= 3) {
-    const [length, od, thk] = dims;
-    const innerDiameter = Math.max(od - 2 * thk, 0);
-    volumeMm3 = (pi / 4) * (od * od - innerDiameter * innerDiameter) * length;
-  } else if (name.includes('rod') && dims.length >= 2) {
-    const [length, dia] = dims;
-    volumeMm3 = (pi / 4) * dia * dia * length;
-  } else if ((name.includes('angel') || name.includes('angle')) && dims.length >= 4) {
-    const [length, legA, legB, thk] = dims;
-    volumeMm3 = (legA + legB - thk) * thk * length;
-  } else if ((name.includes('flunge') || name.includes('flange')) && dims.length >= 3) {
-    const [od, id, thk] = dims;
-    volumeMm3 = (pi / 4) * Math.max(od * od - id * id, 0) * thk;
-  } else if (dims.length >= 3) {
-    const [length, width, thickness] = dims;
-    volumeMm3 = length * width * thickness;
-  }
-  return ((volumeMm3 * density) / 1_000_000_000) * qty;
 }
 
 type SessionAuth = {
@@ -161,6 +138,10 @@ function toEntry(
   const m = point.meta;
   const fromMeta = (key: string) => (m && typeof m === 'object' && m[key] != null ? String(m[key]) : '');
   const weightStr = fromMeta('weight') || String(point.value);
+  const itemDetails = fromMeta('itemDetails');
+  const dimensions = fromMeta('dimensions');
+  const barLengthMm =
+    fromMeta('barLengthMm') || entryBarLengthMm({ itemDetails, dimensions });
   return {
     dataId: point.id,
     user: fromMeta('user') || username,
@@ -169,11 +150,12 @@ function toEntry(
     createdAt: new Date(point.timestamp).toLocaleString(),
     projectType: fromMeta('projectType'),
     areaSection: fromMeta('areaSection'),
-    itemDetails: fromMeta('itemDetails'),
-    dimensions: fromMeta('dimensions'),
+    itemDetails,
+    dimensions,
     lengthMm: fromMeta('lengthMm'),
     widthMm: fromMeta('widthMm'),
     thkDia: fromMeta('thkDia'),
+    barLengthMm,
     densityKgM3: fromMeta('densityKgM3'),
     qty: fromMeta('qty'),
     weight: weightStr,
@@ -279,7 +261,7 @@ export default function App() {
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   const latestUserEntry = userEntries[userEntries.length - 1];
   const userTrendEntries = userEntries.slice(-6);
-  const userTrendValues = userTrendEntries.map((entry) => Number.parseFloat(entry.weight || entry.value) || 0);
+  const userTrendValues = userTrendEntries.map((entry) => computeEntryWeightKg(entry));
   const userTrendMax = Math.max(...userTrendValues, 1);
   const userTrendPoints = userTrendValues
     .map((value, index) => {
@@ -346,7 +328,7 @@ export default function App() {
       const idx = byMonth.get(`${parsed.getFullYear()}-${parsed.getMonth()}`);
       if (idx == null) return;
       buckets[idx].entryCount += 1;
-      buckets[idx].totalWeight += Number.parseFloat(entry.weight || entry.value) || 0;
+      buckets[idx].totalWeight += computeEntryWeightKg(entry);
     });
     return {
       months: buckets.map((bucket) => bucket.label),
@@ -878,13 +860,26 @@ export default function App() {
     let lengthMm = '';
     let widthMm = '';
     let thkDia = '';
+    let barLengthMm = '';
     const dimParts = parseDimensionParts(dimensions);
-    if (dimParts.length >= 1) lengthMm = String(dimParts[0]);
-    if (dimParts.length >= 2) widthMm = String(dimParts[1]);
-    if (dimParts.length >= 3) thkDia = String(dimParts[2]);
+    if (isMsAngleMaterialName(itemDetails) && dimParts.length >= 3) {
+      lengthMm = String(dimParts[0]);
+      widthMm = String(dimParts[1]);
+      thkDia = String(dimParts[2]);
+      if (dimParts.length >= 4) barLengthMm = String(dimParts[3]);
+    } else {
+      if (dimParts.length >= 1) lengthMm = String(dimParts[0]);
+      if (dimParts.length >= 2) widthMm = String(dimParts[1]);
+      if (dimParts.length >= 3) thkDia = String(dimParts[2]);
+    }
     const densityKgM3 = '7850';
-    const computedWeightValue = computeMaterialWeightFromDimensions(itemDetails, dimensions, qty);
-    const computedWeight = computedWeightValue.toFixed(2);
+    const materialPayload = materialFromStored(itemDetails, dimensions, qty);
+    const validation = validateMaterialPayload(materialPayload);
+    if (!validation.valid) {
+      setStatus(validation.errors.join(' '));
+      return;
+    }
+    const computedWeight = validation.weightKg.toFixed(2);
     if (!projectId) return;
     try {
       await createProjectData(auth.accessToken, {
@@ -899,6 +894,7 @@ export default function App() {
           lengthMm,
           widthMm,
           thkDia,
+          barLengthMm,
           densityKgM3,
           qty,
           weight: computedWeight,
@@ -918,7 +914,7 @@ export default function App() {
     entryIndex: number,
     updates: Pick<
       ProjectEntry,
-      'projectType' | 'areaSection' | 'itemDetails' | 'lengthMm' | 'widthMm' | 'thkDia' | 'densityKgM3' | 'qty' | 'weldingMeters' | 'remarks'
+      'projectType' | 'areaSection' | 'itemDetails' | 'lengthMm' | 'widthMm' | 'thkDia' | 'barLengthMm' | 'densityKgM3' | 'qty' | 'weldingMeters' | 'remarks'
     >,
   ) => {
     if (!auth) return;
@@ -928,17 +924,33 @@ export default function App() {
       setStatus('Entry id not found.');
       return;
     }
-    const updatedWeight = (
-      toNumber(updates.lengthMm) * toNumber(updates.widthMm) * toNumber(updates.thkDia) * toNumber(updates.densityKgM3) * Math.max(toNumber(updates.qty), 1) / 1_000_000_000
-    ).toFixed(2);
+    const barLengthMm =
+      updates.barLengthMm?.trim() ||
+      (isMsAngleMaterialName(updates.itemDetails) ? entryBarLengthMm(entry) : '');
+    const dimensions = buildEntryDimensionsFromFields(
+      updates.itemDetails,
+      updates.lengthMm,
+      updates.widthMm,
+      updates.thkDia,
+      barLengthMm,
+    );
+    const materialPayload = materialFromStored(updates.itemDetails, dimensions, updates.qty);
+    const validation = validateMaterialPayload(materialPayload);
+    if (!validation.valid) {
+      setStatus(validation.errors.join(' '));
+      return;
+    }
+    const updatedWeight = validation.weightKg.toFixed(2);
     const meta = {
       user: entry.user,
       projectType: updates.projectType,
       areaSection: updates.areaSection,
       itemDetails: updates.itemDetails,
+      dimensions,
       lengthMm: updates.lengthMm,
       widthMm: updates.widthMm,
       thkDia: updates.thkDia,
+      barLengthMm,
       densityKgM3: updates.densityKgM3,
       qty: updates.qty,
       weight: updatedWeight,

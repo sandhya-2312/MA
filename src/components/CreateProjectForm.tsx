@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import type { Project, ProjectEntry } from '../types';
 
 const projectKindOptions = ['Refit', 'New Project'] as const;
@@ -106,6 +106,47 @@ function parseDimensionParts(raw: string): number[] {
     .filter((value) => Number.isFinite(value) && value > 0);
 }
 
+export function isMsAngleMaterialName(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  return n.includes('angle') || n.includes('angel');
+}
+
+/** Bar length (mm) for MS Angle — from meta or 4th segment of `dimensions`. */
+export function entryBarLengthMm(entry: {
+  itemDetails?: string;
+  dimensions?: string;
+  barLengthMm?: string;
+}): string {
+  const fromMeta = entry.barLengthMm?.trim();
+  if (fromMeta) return fromMeta;
+  if (!isMsAngleMaterialName(entry.itemDetails ?? '')) return '';
+  const raw = entry.dimensions?.trim();
+  if (!raw) return '';
+  const parts = parseDimensionParts(raw);
+  return parts.length >= 4 ? String(parts[3]) : '';
+}
+
+/** Build stored `dimensions` string from table/edit fields (angle: A×B×T×bar L). */
+export function buildEntryDimensionsFromFields(
+  itemDetails: string,
+  lengthMm: string,
+  widthMm: string,
+  thkDia: string,
+  barLengthMm?: string,
+): string {
+  const a = lengthMm.trim();
+  const b = widthMm.trim();
+  const t = thkDia.trim();
+  const bar = barLengthMm?.trim() ?? '';
+  if (isMsAngleMaterialName(itemDetails)) {
+    if (a && b && t && bar) return `${a}x${b}x${t}x${bar}`;
+    if (a && b && t) return `${a}x${b}x${t}`;
+    return '';
+  }
+  if (a && b && t) return `${a}x${b}x${t}`;
+  return '';
+}
+
 function mmToM(raw: string): number {
   return (Number.parseFloat(raw) || 0) / 1000;
 }
@@ -155,7 +196,7 @@ export function materialToDimensions(material: ProjectMaterialPayload): string {
   }
 }
 
-function materialFromStored(name: string, dimensions: string, quantity: string): ProjectMaterialPayload {
+export function materialFromStored(name: string, dimensions: string, quantity: string): ProjectMaterialPayload {
   const materialType = normalizeMaterialType(name);
   const dims = parseDimensionParts(dimensions);
   const base = emptyMaterial();
@@ -179,6 +220,8 @@ function materialFromStored(name: string, dimensions: string, quantity: string):
       String(dims[2]),
       String(dims[3]),
     ];
+  } else if (materialType === 'MS Angle' && dims.length >= 3) {
+    [base.sideAMm, base.sideBMm, base.thicknessMm] = [String(dims[0]), String(dims[1]), String(dims[2])];
   } else if (materialType === 'MS Flange' && dims.length >= 3) {
     [base.outerDiameterMm, base.innerDiameterMm, base.thicknessMm] = [String(dims[0]), String(dims[1]), String(dims[2])];
   }
@@ -214,10 +257,239 @@ export function computeMaterialPayloadWeightKg(material: ProjectMaterialPayload)
   return computeMaterialWeightKg(material);
 }
 
+export type MaterialValidationResult = {
+  valid: boolean;
+  weightKg: number;
+  errors: string[];
+};
+
+function parsePositiveMm(raw: string): number | null {
+  const v = Number.parseFloat(String(raw ?? '').trim());
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+function mmField(material: ProjectMaterialPayload, mmKey: keyof ProjectMaterialPayload, unitKey: keyof ProjectMaterialPayload): number | null {
+  const mm = String(material[mmKey] ?? '');
+  const unit = material[unitKey] as 'mm' | 'm';
+  const v = toMmByUnit(mm, unit);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/** Validate dimensions and formula for a material row before save. */
+export function validateMaterialPayload(material: ProjectMaterialPayload): MaterialValidationResult {
+  const errors: string[] = [];
+  const qty = parsePositiveMm(material.quantity);
+  if (!qty) errors.push('Quantity must be a positive number.');
+
+  const t = material.materialType;
+  if (t === 'MS Plate') {
+    if (mmField(material, 'lengthMm', 'lengthUnit') == null) errors.push('Length (mm) must be a positive number.');
+    if (mmField(material, 'widthMm', 'widthUnit') == null) errors.push('Width (mm) must be a positive number.');
+    if (mmField(material, 'thicknessMm', 'thicknessUnit') == null) errors.push('Thickness (mm) must be a positive number.');
+  } else if (t === 'MS Rod') {
+    if (mmField(material, 'diameterMm', 'diameterUnit') == null) errors.push('Diameter (mm) must be a positive number.');
+    if (mmField(material, 'lengthMm', 'lengthUnit') == null) errors.push('Length (mm) must be a positive number.');
+  } else if (t === 'MS Pipe') {
+    const od = mmField(material, 'outerDiameterMm', 'outerDiameterUnit');
+    const id = mmField(material, 'innerDiameterMm', 'innerDiameterUnit');
+    if (od == null) errors.push('Outer diameter (mm) must be a positive number.');
+    if (id == null) errors.push('Inner diameter (mm) must be a positive number.');
+    else if (od != null && id >= od) errors.push('Outer diameter must be greater than inner diameter.');
+    if (mmField(material, 'lengthMm', 'lengthUnit') == null) errors.push('Length (mm) must be a positive number.');
+  } else if (t === 'MS Flat Bar') {
+    if (mmField(material, 'widthMm', 'widthUnit') == null) errors.push('Width (mm) must be a positive number.');
+    if (mmField(material, 'thicknessMm', 'thicknessUnit') == null) errors.push('Thickness (mm) must be a positive number.');
+    if (mmField(material, 'lengthMm', 'lengthUnit') == null) errors.push('Length (mm) must be a positive number.');
+  } else if (t === 'MS Angle') {
+    const a = mmField(material, 'sideAMm', 'sideAUnit');
+    const b = mmField(material, 'sideBMm', 'sideBUnit');
+    const thk = mmField(material, 'thicknessMm', 'thicknessUnit');
+    const barL = mmField(material, 'lengthMm', 'lengthUnit');
+    if (a == null) errors.push('Leg A (mm) must be a positive number.');
+    if (b == null) errors.push('Leg B (mm) must be a positive number.');
+    if (thk == null) errors.push('Thickness (mm) must be a positive number.');
+    if (barL == null) errors.push('Bar length (mm) must be a positive number.');
+    else if (a != null && b != null && thk != null && a + b <= thk) {
+      errors.push('Leg A + Leg B must be greater than thickness.');
+    }
+  } else if (t === 'MS Flange') {
+    const od = mmField(material, 'outerDiameterMm', 'outerDiameterUnit');
+    const id = mmField(material, 'innerDiameterMm', 'innerDiameterUnit');
+    if (od == null) errors.push('Outer diameter (mm) must be a positive number.');
+    if (id == null) errors.push('Inner diameter (mm) must be a positive number.');
+    else if (od != null && id >= od) errors.push('Outer diameter must be greater than inner diameter.');
+    if (mmField(material, 'thicknessMm', 'thicknessUnit') == null) errors.push('Thickness (mm) must be a positive number.');
+  } else if (t === 'Add manually') {
+    if (mmField(material, 'lengthMm', 'lengthUnit') == null) errors.push('Length (mm) must be a positive number.');
+    if (mmField(material, 'widthMm', 'widthUnit') == null) errors.push('Width (mm) must be a positive number.');
+    if (mmField(material, 'thicknessMm', 'thicknessUnit') == null) errors.push('Thickness (mm) must be a positive number.');
+    if (!material.customMaterialName.trim()) errors.push('Custom material name is required.');
+  }
+
+  const weightKg = computeMaterialWeightKg(material);
+  if (!errors.length && weightKg <= 0) {
+    errors.push('Calculated weight is invalid. Check dimensions and material type.');
+  }
+  return { valid: errors.length === 0, weightKg, errors };
+}
+
+/** Map a stored project entry into editable material form state. */
+export function entryToMaterialPayload(entry: ProjectEntry): ProjectMaterialPayload {
+  const name = entry.itemDetails?.trim() || '';
+  const dimensions = resolveEntryDimensions(entry);
+  return materialFromStored(name, dimensions, entry.qty?.trim() || '1');
+}
+
+/** Map material form state to entry meta fields for API save. */
+export function materialPayloadToEntryFields(material: ProjectMaterialPayload): {
+  itemDetails: string;
+  dimensions: string;
+  lengthMm: string;
+  widthMm: string;
+  thkDia: string;
+  barLengthMm: string;
+  qty: string;
+  weightKg: string;
+} {
+  const itemDetails =
+    material.materialType === 'Add manually'
+      ? material.customMaterialName.trim() || 'Custom Material'
+      : material.materialType;
+  const dimensions = materialToDimensions(material);
+  const dimParts = parseDimensionParts(dimensions);
+  let lengthMm = '';
+  let widthMm = '';
+  let thkDia = '';
+  let barLengthMm = '';
+  if (material.materialType === 'MS Angle' && dimParts.length >= 3) {
+    lengthMm = String(dimParts[0]);
+    widthMm = String(dimParts[1]);
+    thkDia = String(dimParts[2]);
+    if (dimParts.length >= 4) barLengthMm = String(dimParts[3]);
+  } else {
+    if (dimParts.length >= 1) lengthMm = String(dimParts[0]);
+    if (dimParts.length >= 2) widthMm = String(dimParts[1]);
+    if (dimParts.length >= 3) thkDia = String(dimParts[2]);
+  }
+  const validation = validateMaterialPayload(material);
+  return {
+    itemDetails,
+    dimensions,
+    lengthMm,
+    widthMm,
+    thkDia,
+    barLengthMm,
+    qty: material.quantity.trim() || '1',
+    weightKg: validation.weightKg > 0 ? validation.weightKg.toFixed(2) : '0',
+  };
+}
+
 /** Weight from API-stored `name` / `dimensions` / `quantity` (dimensions are mm, `x`-separated like the form saves). */
 export function computeStoredMaterialWeightKg(material: { name?: string; dimensions?: string; quantity?: string }): number {
   const payload = materialFromStored(material.name ?? '', material.dimensions ?? '', material.quantity ?? '1');
   return computeMaterialWeightKg(payload);
+}
+
+/** Resolve dimensions string from entry meta (prefers stored `dimensions`, else L×W×T). */
+export function resolveEntryDimensions(entry: {
+  itemDetails?: string;
+  dimensions?: string;
+  lengthMm?: string;
+  widthMm?: string;
+  thkDia?: string;
+  barLengthMm?: string;
+}): string {
+  const built = buildEntryDimensionsFromFields(
+    entry.itemDetails ?? '',
+    entry.lengthMm ?? '',
+    entry.widthMm ?? '',
+    entry.thkDia ?? '',
+    entryBarLengthMm(entry),
+  );
+  if (built) return built;
+  const stored = entry.dimensions?.trim();
+  if (stored) return stored;
+  const l = entry.lengthMm?.trim();
+  const w = entry.widthMm?.trim();
+  const t = entry.thkDia?.trim();
+  if (l && w && t) return `${l}x${w}x${t}`;
+  if (l && w) return `${l}x${w}`;
+  return '';
+}
+
+/** Weight (kg) using the same material-type formulas as the project form (plate, angle, pipe, etc.). */
+export function computeEntryWeightKg(entry: {
+  itemDetails?: string;
+  dimensions?: string;
+  qty?: string;
+  lengthMm?: string;
+  widthMm?: string;
+  thkDia?: string;
+  barLengthMm?: string;
+  weight?: string;
+  value?: string;
+}): number {
+  const name = entry.itemDetails?.trim();
+  const dimensions = resolveEntryDimensions(entry);
+  if (name && dimensions) {
+    const computed = computeStoredMaterialWeightKg({
+      name,
+      dimensions,
+      quantity: entry.qty?.trim() || '1',
+    });
+    if (computed > 0) return computed;
+  }
+  const legacy = Number.parseFloat(entry.weight ?? '') || Number.parseFloat(entry.value ?? '');
+  return Number.isFinite(legacy) && legacy > 0 ? legacy : 0;
+}
+
+export function formatEntryWeightKg(
+  entry: Parameters<typeof computeEntryWeightKg>[0],
+): string {
+  const kg = computeEntryWeightKg(entry);
+  return kg > 0 ? kg.toFixed(2) : '—';
+}
+
+export type EntryDimensionCell = { label: string; value: string };
+
+function dimCell(label: string, raw: string): EntryDimensionCell {
+  const v = String(raw ?? '').trim();
+  return { label, value: v || '—' };
+}
+
+/** Four dimension columns for the entries table — labels match material type (L/W/T, A/B/T, OD/ID, etc.). */
+export function getEntryDimensionCells(entry: {
+  itemDetails?: string;
+  dimensions?: string;
+  qty?: string;
+  lengthMm?: string;
+  widthMm?: string;
+  thkDia?: string;
+  barLengthMm?: string;
+}): [EntryDimensionCell, EntryDimensionCell, EntryDimensionCell, EntryDimensionCell] {
+  const m = materialFromStored(entry.itemDetails ?? '', resolveEntryDimensions(entry), entry.qty?.trim() || '1');
+  const empty = dimCell('—', '');
+  switch (m.materialType) {
+    case 'MS Plate':
+      return [dimCell('L', m.lengthMm), dimCell('W', m.widthMm), dimCell('T', m.thicknessMm), empty];
+    case 'MS Rod':
+      return [dimCell('Ø', m.diameterMm), dimCell('L', m.lengthMm), empty, empty];
+    case 'MS Pipe':
+      return [dimCell('OD', m.outerDiameterMm), dimCell('ID', m.innerDiameterMm), dimCell('L', m.lengthMm), empty];
+    case 'MS Flat Bar':
+      return [dimCell('W', m.widthMm), dimCell('T', m.thicknessMm), dimCell('L', m.lengthMm), empty];
+    case 'MS Angle':
+      return [dimCell('A', m.sideAMm), dimCell('B', m.sideBMm), dimCell('T', m.thicknessMm), dimCell('Bar L', m.lengthMm)];
+    case 'MS Flange':
+      return [dimCell('OD', m.outerDiameterMm), dimCell('ID', m.innerDiameterMm), dimCell('T', m.thicknessMm), empty];
+    default:
+      return [
+        dimCell('L', m.lengthMm || entry.lengthMm || ''),
+        dimCell('W', m.widthMm || entry.widthMm || ''),
+        dimCell('T', m.thicknessMm || entry.thkDia || ''),
+        dimCell('Bar L', entry.barLengthMm ?? ''),
+      ];
+  }
 }
 
 /** Human-readable dimensions matching the project form field order; values shown in mm (storage format). */
@@ -292,7 +564,7 @@ function entryToLineItem(e: ProjectEntry): ProjectLineItemPayload {
     projectType: e.projectType ?? '',
     areaSection: e.areaSection ?? '',
     itemDetails: e.itemDetails ?? '',
-    dimensions: e.dimensions ?? '',
+    dimensions: resolveEntryDimensions(e),
     lengthMm: e.lengthMm ?? '',
     widthMm: e.widthMm ?? '',
     thkDia: e.thkDia ?? '',
@@ -326,9 +598,15 @@ function patchLineFromMaterial(m: ProjectMaterialPayload, prev: ProjectLineItemP
   let lengthMm = '';
   let widthMm = '';
   let thkDia = '';
-  if (dimParts.length >= 1) lengthMm = String(dimParts[0]);
-  if (dimParts.length >= 2) widthMm = String(dimParts[1]);
-  if (dimParts.length >= 3) thkDia = String(dimParts[2]);
+  if (m.materialType === 'MS Angle' && dimParts.length >= 3) {
+    lengthMm = String(dimParts[0]);
+    widthMm = String(dimParts[1]);
+    thkDia = String(dimParts[2]);
+  } else {
+    if (dimParts.length >= 1) lengthMm = String(dimParts[0]);
+    if (dimParts.length >= 2) widthMm = String(dimParts[1]);
+    if (dimParts.length >= 3) thkDia = String(dimParts[2]);
+  }
   return {
     itemDetails: name,
     qty: m.quantity.trim(),
@@ -579,6 +857,20 @@ export function CreateProjectForm({
     if (hasDuplicateMaterials) {
       setMaterialsError('Duplicate materials are not allowed. Please remove or change the duplicates before saving.');
       return;
+    }
+
+    const activeMaterials = materials.filter((material) => {
+      const name =
+        material.materialType === 'Add manually' ? material.customMaterialName.trim() : material.materialType.trim();
+      const dims = materialToDimensions(material).trim();
+      return !!(name || dims);
+    });
+    for (const material of activeMaterials) {
+      const result = validateMaterialPayload(material);
+      if (!result.valid) {
+        setMaterialsError(result.errors.join(' '));
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -958,6 +1250,26 @@ export function CreateProjectForm({
   );
 }
 
+function MaterialField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className={labelClass}>{label}</p>
+      {children}
+    </div>
+  );
+}
+
+function LabeledUnitInput({
+  label,
+  ...unitProps
+}: { label: string } & Parameters<typeof UnitInput>[0]) {
+  return (
+    <MaterialField label={label}>
+      <UnitInput {...unitProps} />
+    </MaterialField>
+  );
+}
+
 export type ProjectMaterialRowsEditorProps = {
   materials: ProjectMaterialPayload[];
   onMaterialsChange: (next: ProjectMaterialPayload[]) => void;
@@ -990,7 +1302,8 @@ export function ProjectMaterialRowsEditor({
     if (readOnly) return;
     onMaterialsChange(materials.length <= 1 ? materials : materials.filter((_, i) => i !== index));
   };
-  const materialWeights = materials.map((material) => computeMaterialWeightKg(material));
+  const materialValidations = materials.map((material) => validateMaterialPayload(material));
+  const materialWeights = materialValidations.map((v) => v.weightKg);
   const totalMaterialWeightKg = materialWeights.reduce((sum, weight) => sum + weight, 0);
   const showFooter = showTotalFooter && !embedded;
 
@@ -1026,8 +1339,9 @@ export function ProjectMaterialRowsEditor({
                 )}
               </div>
             )}
-            <div className="grid gap-3 md:grid-cols-4">
-              <select
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <MaterialField label="Material type">
+                <select
                 value={material.materialType}
                 onChange={(e) => updateMaterial(index, { materialType: e.target.value as MaterialType })}
                 disabled={readOnly}
@@ -1038,41 +1352,47 @@ export function ProjectMaterialRowsEditor({
                     {opt}
                   </option>
                 ))}
-              </select>
+                </select>
+              </MaterialField>
               {material.materialType === 'Add manually' && (
-                <input
-                  value={material.customMaterialName}
-                  onChange={(e) => updateMaterial(index, { customMaterialName: e.target.value })}
-                  placeholder="Enter material type"
-                  readOnly={readOnly}
-                  className={`${fieldClass} w-full read-only:bg-slate-100`}
-                />
+                <MaterialField label="Custom material name">
+                  <input
+                    value={material.customMaterialName}
+                    onChange={(e) => updateMaterial(index, { customMaterialName: e.target.value })}
+                    placeholder="Enter material type"
+                    readOnly={readOnly}
+                    className={`${fieldClass} w-full read-only:bg-slate-100`}
+                  />
+                </MaterialField>
               )}
               {material.materialType === 'MS Plate' && (
                 <>
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Length"
                     readOnly={readOnly}
                     value={material.lengthMm}
                     onChange={(value) => updateMaterial(index, { lengthMm: value })}
-                    placeholder="Length (mm)"
+                    placeholder="e.g. 10000"
                     unit={material.lengthUnit}
                     onUnitChange={(unit) => updateMaterial(index, { lengthUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Width"
                     readOnly={readOnly}
                     value={material.widthMm}
                     onChange={(value) => updateMaterial(index, { widthMm: value })}
-                    placeholder="Width (mm)"
+                    placeholder="e.g. 20000"
                     unit={material.widthUnit}
                     onUnitChange={(unit) => updateMaterial(index, { widthUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Thickness"
                     readOnly={readOnly}
                     value={material.thicknessMm}
                     onChange={(value) => updateMaterial(index, { thicknessMm: value })}
-                    placeholder="Thickness (mm)"
+                    placeholder="e.g. 50"
                     unit={material.thicknessUnit}
                     onUnitChange={(unit) => updateMaterial(index, { thicknessUnit: unit })}
                     className={`${fieldClass} w-full`}
@@ -1081,20 +1401,22 @@ export function ProjectMaterialRowsEditor({
               )}
               {material.materialType === 'MS Rod' && (
                 <>
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Diameter"
                     readOnly={readOnly}
                     value={material.diameterMm}
                     onChange={(value) => updateMaterial(index, { diameterMm: value })}
-                    placeholder="Diameter (mm)"
+                    placeholder="e.g. 50"
                     unit={material.diameterUnit}
                     onUnitChange={(unit) => updateMaterial(index, { diameterUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Length"
                     readOnly={readOnly}
                     value={material.lengthMm}
                     onChange={(value) => updateMaterial(index, { lengthMm: value })}
-                    placeholder="Length (mm)"
+                    placeholder="e.g. 1000"
                     unit={material.lengthUnit}
                     onUnitChange={(unit) => updateMaterial(index, { lengthUnit: unit })}
                     className={`${fieldClass} w-full`}
@@ -1103,29 +1425,32 @@ export function ProjectMaterialRowsEditor({
               )}
               {material.materialType === 'MS Pipe' && (
                 <>
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Outer diameter"
                     readOnly={readOnly}
                     value={material.outerDiameterMm}
                     onChange={(value) => updateMaterial(index, { outerDiameterMm: value })}
-                    placeholder="Outer Diameter (mm)"
+                    placeholder="e.g. 200"
                     unit={material.outerDiameterUnit}
                     onUnitChange={(unit) => updateMaterial(index, { outerDiameterUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Inner diameter"
                     readOnly={readOnly}
                     value={material.innerDiameterMm}
                     onChange={(value) => updateMaterial(index, { innerDiameterMm: value })}
-                    placeholder="Inner Diameter (mm)"
+                    placeholder="e.g. 150"
                     unit={material.innerDiameterUnit}
                     onUnitChange={(unit) => updateMaterial(index, { innerDiameterUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Length"
                     readOnly={readOnly}
                     value={material.lengthMm}
                     onChange={(value) => updateMaterial(index, { lengthMm: value })}
-                    placeholder="Length (mm)"
+                    placeholder="e.g. 1000"
                     unit={material.lengthUnit}
                     onUnitChange={(unit) => updateMaterial(index, { lengthUnit: unit })}
                     className={`${fieldClass} w-full`}
@@ -1134,29 +1459,32 @@ export function ProjectMaterialRowsEditor({
               )}
               {material.materialType === 'MS Flat Bar' && (
                 <>
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Width"
                     readOnly={readOnly}
                     value={material.widthMm}
                     onChange={(value) => updateMaterial(index, { widthMm: value })}
-                    placeholder="Width (mm)"
+                    placeholder="e.g. 100"
                     unit={material.widthUnit}
                     onUnitChange={(unit) => updateMaterial(index, { widthUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Thickness"
                     readOnly={readOnly}
                     value={material.thicknessMm}
                     onChange={(value) => updateMaterial(index, { thicknessMm: value })}
-                    placeholder="Thickness (mm)"
+                    placeholder="e.g. 10"
                     unit={material.thicknessUnit}
                     onUnitChange={(unit) => updateMaterial(index, { thicknessUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Length"
                     readOnly={readOnly}
                     value={material.lengthMm}
                     onChange={(value) => updateMaterial(index, { lengthMm: value })}
-                    placeholder="Length (mm)"
+                    placeholder="e.g. 1000"
                     unit={material.lengthUnit}
                     onUnitChange={(unit) => updateMaterial(index, { lengthUnit: unit })}
                     className={`${fieldClass} w-full`}
@@ -1165,38 +1493,42 @@ export function ProjectMaterialRowsEditor({
               )}
               {material.materialType === 'MS Angle' && (
                 <>
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Side A"
                     readOnly={readOnly}
                     value={material.sideAMm}
                     onChange={(value) => updateMaterial(index, { sideAMm: value })}
-                    placeholder="Side A (mm)"
+                    placeholder="e.g. 75"
                     unit={material.sideAUnit}
                     onUnitChange={(unit) => updateMaterial(index, { sideAUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Side B"
                     readOnly={readOnly}
                     value={material.sideBMm}
                     onChange={(value) => updateMaterial(index, { sideBMm: value })}
-                    placeholder="Side B (mm)"
+                    placeholder="e.g. 75"
                     unit={material.sideBUnit}
                     onUnitChange={(unit) => updateMaterial(index, { sideBUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Thickness"
                     readOnly={readOnly}
                     value={material.thicknessMm}
                     onChange={(value) => updateMaterial(index, { thicknessMm: value })}
-                    placeholder="Thickness (mm)"
+                    placeholder="e.g. 8"
                     unit={material.thicknessUnit}
                     onUnitChange={(unit) => updateMaterial(index, { thicknessUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Length"
                     readOnly={readOnly}
                     value={material.lengthMm}
                     onChange={(value) => updateMaterial(index, { lengthMm: value })}
-                    placeholder="Length (mm)"
+                    placeholder="e.g. 1000"
                     unit={material.lengthUnit}
                     onUnitChange={(unit) => updateMaterial(index, { lengthUnit: unit })}
                     className={`${fieldClass} w-full`}
@@ -1205,29 +1537,32 @@ export function ProjectMaterialRowsEditor({
               )}
               {material.materialType === 'MS Flange' && (
                 <>
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Outer diameter"
                     readOnly={readOnly}
                     value={material.outerDiameterMm}
                     onChange={(value) => updateMaterial(index, { outerDiameterMm: value })}
-                    placeholder="Outer Diameter (mm)"
+                    placeholder="e.g. 300"
                     unit={material.outerDiameterUnit}
                     onUnitChange={(unit) => updateMaterial(index, { outerDiameterUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Inner diameter"
                     readOnly={readOnly}
                     value={material.innerDiameterMm}
                     onChange={(value) => updateMaterial(index, { innerDiameterMm: value })}
-                    placeholder="Inner Diameter (mm)"
+                    placeholder="e.g. 200"
                     unit={material.innerDiameterUnit}
                     onUnitChange={(unit) => updateMaterial(index, { innerDiameterUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Thickness"
                     readOnly={readOnly}
                     value={material.thicknessMm}
                     onChange={(value) => updateMaterial(index, { thicknessMm: value })}
-                    placeholder="Thickness (mm)"
+                    placeholder="e.g. 20"
                     unit={material.thicknessUnit}
                     onUnitChange={(unit) => updateMaterial(index, { thicknessUnit: unit })}
                     className={`${fieldClass} w-full`}
@@ -1236,52 +1571,60 @@ export function ProjectMaterialRowsEditor({
               )}
               {material.materialType === 'Add manually' && (
                 <>
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Length"
                     readOnly={readOnly}
                     value={material.lengthMm}
                     onChange={(value) => updateMaterial(index, { lengthMm: value })}
-                    placeholder={`Length (${material.lengthUnit})`}
+                    placeholder={`e.g. 1000`}
                     unit={material.lengthUnit}
                     onUnitChange={(unit) => updateMaterial(index, { lengthUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Width"
                     readOnly={readOnly}
                     value={material.widthMm}
                     onChange={(value) => updateMaterial(index, { widthMm: value })}
-                    placeholder={`Width (${material.widthUnit})`}
+                    placeholder={`e.g. 500`}
                     unit={material.widthUnit}
                     onUnitChange={(unit) => updateMaterial(index, { widthUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
-                  <UnitInput
+                  <LabeledUnitInput
+                    label="Thickness"
                     readOnly={readOnly}
                     value={material.thicknessMm}
                     onChange={(value) => updateMaterial(index, { thicknessMm: value })}
-                    placeholder={`Thickness (${material.thicknessUnit})`}
+                    placeholder={`e.g. 10`}
                     unit={material.thicknessUnit}
                     onUnitChange={(unit) => updateMaterial(index, { thicknessUnit: unit })}
                     className={`${fieldClass} w-full`}
                   />
                 </>
               )}
-              <UnitInput
+              <LabeledUnitInput
+                label="Quantity"
                 readOnly={readOnly}
                 value={material.quantity}
                 onChange={(value) => updateMaterial(index, { quantity: value })}
-                placeholder="Material quantity"
+                placeholder="e.g. 1"
                 unit="qty"
                 className={`${fieldClass} w-full`}
               />
-              <UnitInput
+              <LabeledUnitInput
+                label="Calculated weight"
                 value={materialWeights[index].toFixed(2)}
                 onChange={() => {}}
-                placeholder="Weight"
+                placeholder="Auto"
                 unit="kg"
                 className={`${fieldClass} w-full bg-slate-100`}
                 readOnly
               />
             </div>
+            {!materialValidations[index].valid && materialValidations[index].errors.length > 0 ? (
+              <p className="mt-2 text-xs font-medium text-rose-600">{materialValidations[index].errors.join(' ')}</p>
+            ) : null}
           </div>
         ))}
       </div>

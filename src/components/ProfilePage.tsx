@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react';
+import { roleLabel } from '../roleLabel';
 import type { UserAccount } from '../types';
 
 type ProfilePageProps = {
@@ -6,6 +7,10 @@ type ProfilePageProps = {
   status: string;
   handleSaveProfile: (event: FormEvent<HTMLFormElement>) => void;
 };
+
+const labelClass = 'mb-1 block text-xs font-medium text-slate-600';
+const inputClass =
+  'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2';
 
 function IconProfile() {
   return (
@@ -32,48 +37,97 @@ export function ProfilePage({ loggedInUser, status, handleSaveProfile }: Profile
         <form
           key={`${loggedInUser.id}-${loggedInUser.username}-${loggedInUser.contactNo}-${loggedInUser.fullName}-${loggedInUser.email}-${loggedInUser.designation}`}
           onSubmit={handleSaveProfile}
-          className="grid gap-3 md:grid-cols-2"
+          className="grid gap-4 md:grid-cols-2"
         >
-          <input
-            name="fullName"
-            defaultValue={loggedInUser.fullName}
-            placeholder="Full name"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-            required
-          />
-          <input
-            name="username"
-            defaultValue={loggedInUser.username}
-            placeholder="Username"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-            required
-          />
-          <input
-            name="email"
-            type="email"
-            defaultValue={loggedInUser.email}
-            placeholder="Email"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-            required
-          />
-          <input
-            name="contactNo"
-            defaultValue={loggedInUser.contactNo}
-            placeholder="Contact number"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-          />
-          <input
-            name="designation"
-            defaultValue={loggedInUser.designation}
-            placeholder="Designation (optional)"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-          />
-          <input
-            name="newPassword"
-            type="password"
-            placeholder="New password (optional)"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2 md:col-span-2"
-          />
+          <div>
+            <label className={labelClass} htmlFor="profile-full-name">
+              Full name
+            </label>
+            <input
+              id="profile-full-name"
+              name="fullName"
+              defaultValue={loggedInUser.fullName}
+              placeholder="Enter full name"
+              className={inputClass}
+              required
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="profile-username">
+              Username
+            </label>
+            <input
+              id="profile-username"
+              name="username"
+              defaultValue={loggedInUser.username}
+              placeholder="Login username"
+              className={inputClass}
+              required
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="profile-email">
+              Email
+            </label>
+            <input
+              id="profile-email"
+              name="email"
+              type="email"
+              defaultValue={loggedInUser.email}
+              placeholder="name@example.com"
+              className={inputClass}
+              required
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="profile-contact">
+              Contact number
+            </label>
+            <input
+              id="profile-contact"
+              name="contactNo"
+              defaultValue={loggedInUser.contactNo}
+              placeholder="Phone or mobile number"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="profile-designation">
+              Designation
+            </label>
+            <input
+              id="profile-designation"
+              name="designation"
+              defaultValue={loggedInUser.designation}
+              placeholder="Job title (optional)"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="profile-role">
+              Role
+            </label>
+            <input
+              id="profile-role"
+              value={roleLabel(loggedInUser.role)}
+              readOnly
+              className={`${inputClass} cursor-not-allowed bg-slate-50 text-slate-600`}
+              aria-readonly="true"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className={labelClass} htmlFor="profile-password">
+              New password
+            </label>
+            <input
+              id="profile-password"
+              name="newPassword"
+              type="password"
+              placeholder="Leave blank to keep current password"
+              className={inputClass}
+              autoComplete="new-password"
+            />
+          </div>
           <button
             type="submit"
             className="rounded-md bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 md:col-span-2 md:justify-self-start"

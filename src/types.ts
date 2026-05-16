@@ -45,6 +45,8 @@ export type ProjectEntry = {
   lengthMm: string;
   widthMm: string;
   thkDia: string;
+  /** MS Angle bar length (mm); 4th dimension in `dimensions` (A×B×T×L). */
+  barLengthMm: string;
   densityKgM3: string;
   qty: string;
   weight: string;

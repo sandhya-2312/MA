@@ -1,19 +1,18 @@
 import { useMemo } from 'react';
+import { deleteIconButtonClass, IconTrash } from './actionIcons';
 import type { Project, ProjectEntry } from '../types';
 import {
+  computeEntryWeightKg,
   computeStoredMaterialWeightKg,
+  formatEntryWeightKg,
   formatStoredMaterialDimensions,
+  getEntryDimensionCells,
 } from './CreateProjectForm';
+import { EntryDimensionTd } from './EntryDimensionCells';
 
 function cell(value: string | undefined) {
   const v = value?.trim();
   return v || '';
-}
-
-function entryWeightKg(e: ProjectEntry) {
-  const w = parseFloat(e.weight);
-  if (!Number.isNaN(w) && w !== 0) return w;
-  return parseFloat(e.value) || 0;
 }
 
 type SummaryGroup = {
@@ -66,7 +65,7 @@ export function ProjectSummaryPage({ project, onBack, onDeleteEntry, onExportRep
     let weight = 0;
     let welding = 0;
     for (const e of project.entries) {
-      weight += entryWeightKg(e);
+      weight += computeEntryWeightKg(e);
       welding += parseFloat(e.weldingMeters) || 0;
     }
     return { weight, welding };
@@ -254,9 +253,10 @@ export function ProjectSummaryPage({ project, onBack, onDeleteEntry, onExportRep
                 <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">
                   Description / Item
                 </th>
-                <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">L (mm)</th>
-                <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">W (mm)</th>
-                <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">Thk/Dia</th>
+                <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">Dim 1 (mm)</th>
+                <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">Dim 2 (mm)</th>
+                <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">Dim 3 (mm)</th>
+                <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">Dim 4 (mm)</th>
                 <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">Qty</th>
                 <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">Weight (kg)</th>
                 <th className="border border-slate-200 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide">
@@ -269,7 +269,7 @@ export function ProjectSummaryPage({ project, onBack, onDeleteEntry, onExportRep
             <tbody>
               {groups.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="border border-slate-200 px-3 py-12 text-center text-slate-500">
+                  <td colSpan={12} className="border border-slate-200 px-3 py-12 text-center text-slate-500">
                     No entries for this project yet.
                   </td>
                 </tr>
@@ -277,6 +277,7 @@ export function ProjectSummaryPage({ project, onBack, onDeleteEntry, onExportRep
                 groups.flatMap((group) =>
                   group.rows.map((entry, ri) => {
                     const itemLabel = cell(entry.itemDetails) || cell(entry.label) || 'Entry';
+                    const [d1, d2, d3, d4] = getEntryDimensionCells(entry);
                     return (
                       <tr key={`${project.id}-${group.sn}-${ri}-${entry.dataId ?? ri}`} className="bg-white hover:bg-slate-50/80">
                         {ri === 0 ? (
@@ -296,20 +297,13 @@ export function ProjectSummaryPage({ project, onBack, onDeleteEntry, onExportRep
                           </>
                         ) : null}
                         <td className="border border-slate-200 px-3 py-2 text-slate-700">{itemLabel}</td>
-                        <td className="border border-slate-200 px-3 py-2 tabular-nums text-slate-700">
-                          {cell(entry.lengthMm)}
-                        </td>
-                        <td className="border border-slate-200 px-3 py-2 tabular-nums text-slate-700">
-                          {cell(entry.widthMm)}
-                        </td>
-                        <td className="border border-slate-200 px-3 py-2 tabular-nums text-slate-700">
-                          {cell(entry.thkDia)}
-                        </td>
+                        <EntryDimensionTd cell={d1} className="border border-slate-200 px-3 py-2 align-top tabular-nums" />
+                        <EntryDimensionTd cell={d2} className="border border-slate-200 px-3 py-2 align-top tabular-nums" />
+                        <EntryDimensionTd cell={d3} className="border border-slate-200 px-3 py-2 align-top tabular-nums" />
+                        <EntryDimensionTd cell={d4} className="border border-slate-200 px-3 py-2 align-top tabular-nums" />
                         <td className="border border-slate-200 px-3 py-2 tabular-nums text-slate-700">{cell(entry.qty)}</td>
-                        <td className="border border-slate-200 px-3 py-2 tabular-nums text-slate-800">
-                          {entryWeightKg(entry)
-                            ? entryWeightKg(entry).toLocaleString(undefined, { maximumFractionDigits: 2 })
-                            : cell(entry.weight) || cell(entry.value)}
+                        <td className="border border-slate-200 px-3 py-2 text-right font-semibold tabular-nums text-teal-800">
+                          {formatEntryWeightKg(entry)}
                         </td>
                         <td className="border border-slate-200 px-3 py-2 tabular-nums text-slate-700">
                           {cell(entry.weldingMeters)}
@@ -320,9 +314,11 @@ export function ProjectSummaryPage({ project, onBack, onDeleteEntry, onExportRep
                             <button
                               type="button"
                               onClick={() => onDeleteEntry(project.id, entry.dataId!)}
-                              className="rounded border border-rose-200 bg-white px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+                              title="Delete entry"
+                              aria-label="Delete entry"
+                              className={deleteIconButtonClass}
                             >
-                              Delete
+                              <IconTrash />
                             </button>
                           ) : (
                             <span className="text-xs text-slate-400">—</span>

@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { useMemo, useState } from 'react';
+import { deleteIconButtonClass, editIconButtonClass, IconPencil, IconTrash } from './actionIcons';
 import { roleLabel } from '../roleLabel';
 import type { Project, Role, UserAccount } from '../types';
 
@@ -48,6 +49,10 @@ const dashboardStatCardClass =
 
 const iconWrapClass =
   'flex h-8 w-8 shrink-0 items-center justify-center rounded-full [&_svg]:h-4 [&_svg]:w-4';
+
+const memberLabelClass = 'mb-1 block text-xs font-medium text-slate-600';
+const memberInputClass =
+  'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition focus:ring-2';
 
 type MembersSectionProps = {
   isAdmin: boolean;
@@ -273,51 +278,89 @@ export function MembersSection({
           {showMemberCreateForm && (
             <form
               onSubmit={handleCreateUser}
-              className="grid gap-3 rounded-xl border border-slate-200/90 bg-white p-4 shadow-[0_4px_14px_rgba(0,0,0,0.04)] md:grid-cols-2"
+              className="grid gap-4 rounded-xl border border-slate-200/90 bg-white p-4 shadow-[0_4px_14px_rgba(0,0,0,0.04)] md:grid-cols-2"
             >
-              <input
-                name="fullName"
-                placeholder="First Name"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                required
-              />
-              <input
-                name="username"
-                placeholder="Username (login)"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-              />
-              <input
-                name="email"
-                type="email"
-                placeholder="Email ID"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                required
-              />
-              <input
-                name="contactNo"
-                placeholder="Contact No"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-              />
-              <input
-                name="designation"
-                placeholder="Designation (optional)"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-              />
-              <input
-                name="password"
-                type="password"
-                minLength={8}
-                placeholder="Create Password (min 8 chars)"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                required
-              />
-              <select
-                name="role"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition hover:border-slate-300 hover:bg-slate-50 focus:ring-2"
-              >
-                <option value="User">Member</option>
-                <option value="Viewer">Viewer</option>
-              </select>
+              <div>
+                <label className={memberLabelClass} htmlFor="create-member-full-name">
+                  Full name
+                </label>
+                <input
+                  id="create-member-full-name"
+                  name="fullName"
+                  placeholder="Enter full name"
+                  className={memberInputClass}
+                  required
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="create-member-username">
+                  Username
+                </label>
+                <input
+                  id="create-member-username"
+                  name="username"
+                  placeholder="Login username"
+                  className={memberInputClass}
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="create-member-email">
+                  Email
+                </label>
+                <input
+                  id="create-member-email"
+                  name="email"
+                  type="email"
+                  placeholder="name@example.com"
+                  className={memberInputClass}
+                  required
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="create-member-contact">
+                  Contact number
+                </label>
+                <input
+                  id="create-member-contact"
+                  name="contactNo"
+                  placeholder="Phone or mobile number"
+                  className={memberInputClass}
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="create-member-designation">
+                  Designation
+                </label>
+                <input
+                  id="create-member-designation"
+                  name="designation"
+                  placeholder="Job title (optional)"
+                  className={memberInputClass}
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="create-member-password">
+                  Password
+                </label>
+                <input
+                  id="create-member-password"
+                  name="password"
+                  type="password"
+                  minLength={8}
+                  placeholder="Min 8 characters"
+                  className={memberInputClass}
+                  required
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="create-member-role">
+                  Role
+                </label>
+                <select id="create-member-role" name="role" className={memberInputClass}>
+                  <option value="User">Member</option>
+                  <option value="Viewer">Viewer</option>
+                </select>
+              </div>
               <fieldset className="space-y-1 rounded-lg border border-slate-200 bg-slate-50/80 p-3 md:col-span-2">
                 <legend className="px-1 text-[10px] font-medium uppercase tracking-wide text-slate-600">Assign Projects</legend>
                 <div className="grid gap-1 md:grid-cols-2">
@@ -344,60 +387,102 @@ export function MembersSection({
                 event.preventDefault();
                 handleSaveMemberEdit(editingMemberId);
               }}
-              className="grid gap-3 rounded-xl border border-slate-200/90 bg-white p-4 shadow-[0_4px_14px_rgba(0,0,0,0.04)] md:grid-cols-2"
+              className="grid gap-4 rounded-xl border border-slate-200/90 bg-white p-4 shadow-[0_4px_14px_rgba(0,0,0,0.04)] md:grid-cols-2"
             >
               <div className="md:col-span-2">
                 <h4 className="text-lg font-semibold text-slate-800">Edit Member</h4>
                 <p className="text-sm text-slate-500">Update details and project access.</p>
               </div>
-              <input
-                value={editFullName}
-                onChange={(event) => setEditFullName(event.target.value)}
-                placeholder="Member name"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                required
-              />
-              <input
-                value={editUsername}
-                onChange={(event) => setEditUsername(event.target.value)}
-                placeholder="Username (login)"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                required
-              />
-              <input
-                value={editEmail}
-                onChange={(event) => setEditEmail(event.target.value)}
-                type="email"
-                placeholder="Email ID"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-                required
-              />
-              <input
-                value={editContactNo}
-                onChange={(event) => setEditContactNo(event.target.value)}
-                placeholder="Contact No"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-              />
-              <input
-                value={editDesignation}
-                onChange={(event) => setEditDesignation(event.target.value)}
-                placeholder="Designation (optional)"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-              />
-              <input
-                value={editAssignedOn}
-                onChange={(event) => setEditAssignedOn(event.target.value)}
-                type="date"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition focus:ring-2"
-              />
-              <select
-                value={editRole}
-                onChange={(event) => setEditRole(event.target.value as Role)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none ring-slate-200 transition hover:border-slate-300 hover:bg-slate-50 focus:ring-2"
-              >
-                <option value="User">Member</option>
-                <option value="Viewer">Viewer</option>
-              </select>
+              <div>
+                <label className={memberLabelClass} htmlFor="edit-member-full-name">
+                  Full name
+                </label>
+                <input
+                  id="edit-member-full-name"
+                  value={editFullName}
+                  onChange={(event) => setEditFullName(event.target.value)}
+                  placeholder="Enter full name"
+                  className={memberInputClass}
+                  required
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="edit-member-username">
+                  Username
+                </label>
+                <input
+                  id="edit-member-username"
+                  value={editUsername}
+                  onChange={(event) => setEditUsername(event.target.value)}
+                  placeholder="Login username"
+                  className={memberInputClass}
+                  required
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="edit-member-email">
+                  Email
+                </label>
+                <input
+                  id="edit-member-email"
+                  value={editEmail}
+                  onChange={(event) => setEditEmail(event.target.value)}
+                  type="email"
+                  placeholder="name@example.com"
+                  className={memberInputClass}
+                  required
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="edit-member-contact">
+                  Contact number
+                </label>
+                <input
+                  id="edit-member-contact"
+                  value={editContactNo}
+                  onChange={(event) => setEditContactNo(event.target.value)}
+                  placeholder="Phone or mobile number"
+                  className={memberInputClass}
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="edit-member-designation">
+                  Designation
+                </label>
+                <input
+                  id="edit-member-designation"
+                  value={editDesignation}
+                  onChange={(event) => setEditDesignation(event.target.value)}
+                  placeholder="Job title (optional)"
+                  className={memberInputClass}
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="edit-member-assigned-on">
+                  Assigned on
+                </label>
+                <input
+                  id="edit-member-assigned-on"
+                  value={editAssignedOn}
+                  onChange={(event) => setEditAssignedOn(event.target.value)}
+                  type="date"
+                  className={memberInputClass}
+                />
+              </div>
+              <div>
+                <label className={memberLabelClass} htmlFor="edit-member-role">
+                  Role
+                </label>
+                <select
+                  id="edit-member-role"
+                  value={editRole}
+                  onChange={(event) => setEditRole(event.target.value as Role)}
+                  className={memberInputClass}
+                >
+                  <option value="User">Member</option>
+                  <option value="Viewer">Viewer</option>
+                </select>
+              </div>
               <fieldset className="space-y-1 rounded-lg border border-slate-200 bg-slate-50/80 p-3 md:col-span-2">
                 <legend className="px-1 text-[10px] font-medium uppercase tracking-wide text-slate-600">Assign Projects</legend>
                 <div className="grid gap-1 md:grid-cols-2">
@@ -473,21 +558,21 @@ export function MembersSection({
                             <button
                               type="button"
                               onClick={() => handleStartEditMember(member)}
-                              title="Edit"
+                              title="Edit member"
                               aria-label="Edit member"
-                              className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                              className={editIconButtonClass}
                             >
-                              ✎
+                              <IconPencil />
                             </button>
                             <button
                               type="button"
                               onClick={() => setPendingDeleteMember(member)}
                               disabled={member.id === loggedInUserId}
-                              title="Delete"
+                              title="Delete member"
                               aria-label="Delete member"
-                              className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              className={deleteIconButtonClass}
                             >
-                              🗑
+                              <IconTrash />
                             </button>
                           </div>
                         </td>

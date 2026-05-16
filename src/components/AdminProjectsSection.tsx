@@ -2,6 +2,7 @@ import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 import { roleLabel } from '../roleLabel';
 import type { Project, UserAccount } from '../types';
+import { deleteIconButtonClass, editIconButtonClass, IconPencil, IconTrash } from './actionIcons';
 import {
   buildInitialValuesFromProject,
   computeStoredMaterialWeightKg,
@@ -19,30 +20,6 @@ function IconProjectsStat({ className = 'h-7 w-7' }: { className?: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  );
-}
-
-function IconPencil({ className = 'h-4 w-4' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path
-        d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M15 5l4 4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function IconTrash({ className = 'h-4 w-4' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M3 6h18" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M10 11v6M14 11v6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -294,7 +271,7 @@ export function AdminProjectsSection({
                         }}
                         title="Edit project"
                         aria-label="Edit project"
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+                        className={editIconButtonClass}
                       >
                         <IconPencil />
                       </button>
@@ -303,7 +280,7 @@ export function AdminProjectsSection({
                         onClick={() => setPendingDeleteProject(project)}
                         title="Delete project"
                         aria-label="Delete project"
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-600 transition hover:bg-rose-100"
+                        className={`${deleteIconButtonClass} bg-rose-50 hover:bg-rose-100`}
                       >
                         <IconTrash />
                       </button>

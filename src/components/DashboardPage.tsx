@@ -5,7 +5,9 @@ import { ProjectSummaryPage } from './ProjectSummaryPage';
 import {
   computeStoredMaterialWeightKg,
   CreateProjectForm,
+  formatEntryWeightKg,
   formatStoredMaterialDimensions,
+  resolveEntryDimensions,
   type CreateProjectPayload,
 } from './CreateProjectForm';
 import { MembersSection } from './MembersSection';
@@ -16,7 +18,13 @@ import type { NavTab, Project, ProjectEntry, Role, UserAccount } from '../types'
 
 type UserEntryWithProject = ProjectEntry & { projectName: string };
 type UserProjectBar = { id: number; name: string; count: number };
-type TonnageBarDatum = { key: string; label: string; tonnage: number; color: string };
+type TonnageBarDatum = {
+  key: string;
+  label: string;
+  plannedTonnage: number;
+  actualTonnage: number;
+  color: string;
+};
 
 const navIconClass = 'h-4 w-4 shrink-0';
 
@@ -184,10 +192,7 @@ function sumProjectMaterialWeightKg(project: Project): number {
 
 /** Dimensions string for dashboard rows: prefer API meta, else legacy L×W×Thk. */
 function entryDimensionsRaw(e: ProjectEntry): string {
-  const d = e.dimensions?.trim();
-  if (d) return d;
-  const parts = [e.lengthMm, e.widthMm, e.thkDia].map((x) => String(x ?? '').trim()).filter(Boolean);
-  return parts.length ? parts.join('x') : '';
+  return resolveEntryDimensions(e);
 }
 
 function entryDimensionsLabel(e: ProjectEntry): string {
@@ -197,19 +202,7 @@ function entryDimensionsLabel(e: ProjectEntry): string {
 }
 
 function entryWeightDisplayForRecent(e: ProjectEntry): string {
-  const raw = entryDimensionsRaw(e);
-  if (raw && e.itemDetails?.trim() && e.qty?.trim()) {
-    const w = computeStoredMaterialWeightKg({
-      name: e.itemDetails,
-      dimensions: raw,
-      quantity: e.qty,
-    });
-    if (w > 0) {
-      return w.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    }
-  }
-  const w = parseFloat(e.weight) || parseFloat(e.value) || 0;
-  return w ? w.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—';
+  return formatEntryWeightKg(e);
 }
 
 function earliestEntryDateYMD(entries: ProjectEntry[]): string {
@@ -266,61 +259,71 @@ type TonnageBarChartCardProps = {
 };
 
 function buildTonnageBreakdown(projects: Project[], username?: string): { projectBars: TonnageBarDatum[]; materialBars: TonnageBarDatum[] } {
-  const entryProjectWeights = new Map<number, number>();
-  const entryMaterialWeights = new Map<string, number>();
+  const plannedProjectWeights = new Map<number, number>();
+  const actualProjectWeights = new Map<number, number>();
+  const plannedMaterialWeights = new Map<string, number>();
+  const actualMaterialWeights = new Map<string, number>();
 
   projects.forEach((project) => {
-    let projectWeight = 0;
+    let plannedProjectWeight = 0;
+    (project.materials ?? []).forEach((material) => {
+      const weightKg = computeStoredMaterialWeightKg(material);
+      if (weightKg <= 0) return;
+      plannedProjectWeight += weightKg;
+      const materialName = material.name.trim() || 'Unknown material';
+      plannedMaterialWeights.set(materialName, (plannedMaterialWeights.get(materialName) ?? 0) + weightKg);
+    });
+    if (plannedProjectWeight > 0) {
+      plannedProjectWeights.set(project.id, plannedProjectWeight);
+    }
+
+    let actualProjectWeight = 0;
     project.entries.forEach((entry) => {
       if (username && entry.user !== username) return;
       const weightKg = parseFloat(entry.weight) || parseFloat(entry.value) || 0;
       if (weightKg <= 0) return;
-      projectWeight += weightKg;
+      actualProjectWeight += weightKg;
       const materialName = entry.itemDetails.trim() || 'Unknown material';
-      entryMaterialWeights.set(materialName, (entryMaterialWeights.get(materialName) ?? 0) + weightKg);
+      actualMaterialWeights.set(materialName, (actualMaterialWeights.get(materialName) ?? 0) + weightKg);
     });
-    if (projectWeight > 0) {
-      entryProjectWeights.set(project.id, projectWeight);
+    if (actualProjectWeight > 0) {
+      actualProjectWeights.set(project.id, actualProjectWeight);
     }
   });
 
-  // Fallback to planned/material master data when there are no entry-level weight rows.
-  if (entryProjectWeights.size === 0 && entryMaterialWeights.size === 0) {
-    projects.forEach((project) => {
-      let projectWeight = 0;
-      (project.materials ?? []).forEach((material) => {
-        const weightKg = computeStoredMaterialWeightKg(material);
-        if (weightKg <= 0) return;
-        projectWeight += weightKg;
-        const materialName = material.name.trim() || 'Unknown material';
-        entryMaterialWeights.set(materialName, (entryMaterialWeights.get(materialName) ?? 0) + weightKg);
-      });
-      if (projectWeight > 0) {
-        entryProjectWeights.set(project.id, projectWeight);
-      }
-    });
-  }
-
   const sortedProjects = projects
-    .map((project) => ({ id: project.id, name: project.name, weightKg: entryProjectWeights.get(project.id) ?? 0 }))
-    .filter((row) => row.weightKg > 0)
-    .sort((a, b) => b.weightKg - a.weightKg);
-  const sortedMaterials = Array.from(entryMaterialWeights.entries())
-    .map(([name, weightKg]) => ({ name, weightKg }))
-    .filter((row) => row.weightKg > 0)
-    .sort((a, b) => b.weightKg - a.weightKg);
+    .map((project) => ({
+      id: project.id,
+      name: project.name,
+      plannedKg: plannedProjectWeights.get(project.id) ?? 0,
+      actualKg: actualProjectWeights.get(project.id) ?? 0,
+    }))
+    .filter((row) => row.plannedKg > 0 || row.actualKg > 0)
+    .sort((a, b) => Math.max(b.plannedKg, b.actualKg) - Math.max(a.plannedKg, a.actualKg));
+
+  const materialNames = new Set([...plannedMaterialWeights.keys(), ...actualMaterialWeights.keys()]);
+  const sortedMaterials = Array.from(materialNames)
+    .map((name) => ({
+      name,
+      plannedKg: plannedMaterialWeights.get(name) ?? 0,
+      actualKg: actualMaterialWeights.get(name) ?? 0,
+    }))
+    .filter((row) => row.plannedKg > 0 || row.actualKg > 0)
+    .sort((a, b) => Math.max(b.plannedKg, b.actualKg) - Math.max(a.plannedKg, a.actualKg));
 
   return {
     projectBars: sortedProjects.map((row, index) => ({
       key: `project-${row.id}`,
       label: row.name,
-      tonnage: row.weightKg / 1000,
+      plannedTonnage: row.plannedKg / 1000,
+      actualTonnage: row.actualKg / 1000,
       color: DONUT_COLORS[index % DONUT_COLORS.length],
     })),
     materialBars: sortedMaterials.map((row, index) => ({
       key: `material-${row.name}-${index}`,
       label: row.name,
-      tonnage: row.weightKg / 1000,
+      plannedTonnage: row.plannedKg / 1000,
+      actualTonnage: row.actualKg / 1000,
       color: DONUT_COLORS[index % DONUT_COLORS.length],
     })),
   };
@@ -331,27 +334,104 @@ function TonnageBarChartCard({ title, plannedWeightKg, actualWeightKg, projectBa
   const actualTonnage = Math.max(actualWeightKg, 0) / 1000;
   const projectChartBars = projectBars.slice(0, 6);
   const materialChartBars = materialBars.slice(0, 6);
-  const projectMax = Math.max(...projectChartBars.map((bar) => bar.tonnage), 1);
-  const materialMax = Math.max(...materialChartBars.map((bar) => bar.tonnage), 1);
+  const barScaleMax = (bars: TonnageBarDatum[]) =>
+    Math.max(...bars.flatMap((bar) => [bar.plannedTonnage, bar.actualTonnage]), 1);
+  const projectMax = barScaleMax(projectChartBars);
+  const materialMax = barScaleMax(materialChartBars);
   const yTicks = [1, 0.75, 0.5, 0.25, 0];
   const chartTop = 14;
   const chartBottom = 58;
   const chartHeight = chartBottom - chartTop;
+  const plannedBarFill = '#3b82f6';
+  const actualBarFill = '#10b981';
 
-  const formatAxisLabel = (label: string, maxChars: number) =>
-    label.length > maxChars ? `${label.slice(0, Math.max(1, maxChars - 1))}…` : label;
+  const barLetterCode = (index: number) => String.fromCharCode(65 + index);
 
-  const renderBarValueLabel = (bar: TonnageBarDatum, x: number, barWidth: number, y: number) => (
-    <text
-      x={x + barWidth / 2}
-      y={Math.max(7, y - 2.5)}
-      textAnchor="middle"
-      fill="#334155"
-      fontSize="4.6"
-      fontWeight="600"
-    >
-      {`${bar.tonnage.toFixed(2)}t`}
-    </text>
+  const renderBarValueLabel = (tonnage: number, x: number, barWidth: number, y: number) => {
+    if (tonnage <= 0) return null;
+    return (
+      <text
+        x={x + barWidth / 2}
+        y={Math.max(7, y - 2.5)}
+        textAnchor="middle"
+        fill="#334155"
+        fontSize="4.2"
+        fontWeight="600"
+      >
+        {`${tonnage.toFixed(2)}t`}
+      </text>
+    );
+  };
+
+  const renderGroupedBars = (bars: TonnageBarDatum[], maxTonnage: number, keyPrefix: string) =>
+    bars.map((bar, index) => {
+      const slot = 86 / bars.length;
+      const pairWidth = Math.min(12, slot * 0.72);
+      const barWidth = Math.max(1.8, pairWidth / 2 - 0.25);
+      const x0 = 10 + slot * index + (slot - pairWidth) / 2;
+      const centerX = x0 + pairWidth / 2;
+      const plannedHeight = (bar.plannedTonnage / maxTonnage) * chartHeight;
+      const actualHeight = (bar.actualTonnage / maxTonnage) * chartHeight;
+      const plannedY = chartBottom - plannedHeight;
+      const actualY = chartBottom - actualHeight;
+      const cornerRadius = Math.min(2.2, barWidth / 2);
+      return (
+        <g key={`${keyPrefix}-${bar.key}`}>
+          <title>{`${bar.label}: ${bar.plannedTonnage.toFixed(2)}t planned, ${bar.actualTonnage.toFixed(2)}t actual`}</title>
+          <rect
+            x={x0}
+            y={plannedY}
+            width={barWidth}
+            height={Math.max(plannedHeight, 0)}
+            rx={cornerRadius}
+            fill={plannedBarFill}
+          />
+          <rect
+            x={x0 + barWidth + 0.35}
+            y={actualY}
+            width={barWidth}
+            height={Math.max(actualHeight, 0)}
+            rx={cornerRadius}
+            fill={actualBarFill}
+          />
+          {renderBarValueLabel(bar.plannedTonnage, x0, barWidth, plannedY)}
+          {renderBarValueLabel(bar.actualTonnage, x0 + barWidth + 0.35, barWidth, actualY)}
+          <text x={centerX} y="62.5" textAnchor="middle" fill="#334155" fontSize="5.2" fontWeight="700">
+            {barLetterCode(index)}
+          </text>
+        </g>
+      );
+    });
+
+  const renderChartPanel = (bars: TonnageBarDatum[], maxTonnage: number, keyPrefix: string, ariaLabel: string) => (
+    <>
+      <svg viewBox="0 0 100 64" className="h-40 w-full overflow-visible" role="img" aria-label={ariaLabel}>
+        {yTicks.map((tick) => {
+          const y = chartTop + (1 - tick) * chartHeight;
+          return (
+            <line
+              key={`${keyPrefix}-grid-${tick}`}
+              x1="10"
+              y1={y}
+              x2="96"
+              y2={y}
+              stroke="#cbd5e1"
+              strokeWidth="0.45"
+            />
+          );
+        })}
+        <line x1="10" y1={chartBottom} x2="96" y2={chartBottom} stroke="#94a3b8" strokeWidth="0.7" />
+        {renderGroupedBars(bars, maxTonnage, keyPrefix)}
+      </svg>
+      <ul className="mt-2 space-y-0.5 border-t border-slate-200 pt-2">
+        {bars.map((bar, index) => (
+          <li key={`${keyPrefix}-legend-${bar.key}`} className="text-[9px] leading-snug text-slate-600">
+            <span className="font-semibold text-slate-800">{barLetterCode(index)}</span>
+            <span> = {bar.label}</span>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 
   return (
@@ -382,32 +462,7 @@ function TonnageBarChartCard({ title, plannedWeightKg, actualWeightKg, projectBa
             <p className="text-[11px] text-slate-500">No project tonnage data.</p>
           ) : (
             <>
-              <svg viewBox="0 0 100 78" className="h-40 w-full" role="img" aria-label="Project wise tonnage bar chart">
-                {yTicks.map((tick) => {
-                  const y = chartTop + (1 - tick) * chartHeight;
-                  return <line key={`proj-grid-${tick}`} x1="10" y1={y} x2="96" y2={y} stroke="#cbd5e1" strokeWidth="0.45" />;
-                })}
-                <line x1="10" y1={chartBottom} x2="96" y2={chartBottom} stroke="#94a3b8" strokeWidth="0.7" />
-                {projectChartBars.map((bar, index) => {
-                  const slot = 86 / projectChartBars.length;
-                  const barWidth = Math.min(10, slot * 0.68);
-                  const x = 10 + slot * index + (slot - barWidth) / 2;
-                  const barHeight = (bar.tonnage / projectMax) * chartHeight;
-                  const y = chartBottom - barHeight;
-                  const label = formatAxisLabel(bar.label, Math.max(8, Math.floor(slot * 1.35)));
-                  const cornerRadius = Math.min(2.2, barWidth / 2, Math.max(barHeight, 0) / 2);
-                  return (
-                    <g key={bar.key}>
-                      <title>{`${bar.label}: ${bar.tonnage.toFixed(2)}t`}</title>
-                      <rect x={x} y={y} width={barWidth} height={Math.max(barHeight, 0)} rx={cornerRadius} fill={bar.color} />
-                      {renderBarValueLabel(bar, x, barWidth, y)}
-                      <text x={x + barWidth / 2} y="69.5" textAnchor="middle" fill="#475569" fontSize="4.1">
-                        {label}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
+              {renderChartPanel(projectChartBars, projectMax, 'project', 'Project wise tonnage bar chart')}
               {projectBars.length > projectChartBars.length && (
                 <p className="mt-1 text-[10px] text-slate-500">Showing top {projectChartBars.length} projects by tonnage.</p>
               )}
@@ -421,32 +476,7 @@ function TonnageBarChartCard({ title, plannedWeightKg, actualWeightKg, projectBa
             <p className="text-[11px] text-slate-500">No material tonnage data.</p>
           ) : (
             <>
-              <svg viewBox="0 0 100 78" className="h-40 w-full" role="img" aria-label="Material wise tonnage bar chart">
-                {yTicks.map((tick) => {
-                  const y = chartTop + (1 - tick) * chartHeight;
-                  return <line key={`mat-grid-${tick}`} x1="10" y1={y} x2="96" y2={y} stroke="#cbd5e1" strokeWidth="0.45" />;
-                })}
-                <line x1="10" y1={chartBottom} x2="96" y2={chartBottom} stroke="#94a3b8" strokeWidth="0.7" />
-                {materialChartBars.map((bar, index) => {
-                  const slot = 86 / materialChartBars.length;
-                  const barWidth = Math.min(10, slot * 0.68);
-                  const x = 10 + slot * index + (slot - barWidth) / 2;
-                  const barHeight = (bar.tonnage / materialMax) * chartHeight;
-                  const y = chartBottom - barHeight;
-                  const label = formatAxisLabel(bar.label, Math.max(8, Math.floor(slot * 1.35)));
-                  const cornerRadius = Math.min(2.2, barWidth / 2, Math.max(barHeight, 0) / 2);
-                  return (
-                    <g key={bar.key}>
-                      <title>{`${bar.label}: ${bar.tonnage.toFixed(2)}t`}</title>
-                      <rect x={x} y={y} width={barWidth} height={Math.max(barHeight, 0)} rx={cornerRadius} fill={bar.color} />
-                      {renderBarValueLabel(bar, x, barWidth, y)}
-                      <text x={x + barWidth / 2} y="69.5" textAnchor="middle" fill="#475569" fontSize="4.1">
-                        {label}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
+              {renderChartPanel(materialChartBars, materialMax, 'material', 'Material wise tonnage bar chart')}
               {materialBars.length > materialChartBars.length && (
                 <p className="mt-1 text-[10px] text-slate-500">Showing top {materialChartBars.length} materials by tonnage.</p>
               )}
@@ -540,7 +570,7 @@ type DashboardPageProps = {
     entryIndex: number,
     updates: Pick<
       ProjectEntry,
-      'projectType' | 'areaSection' | 'itemDetails' | 'lengthMm' | 'widthMm' | 'thkDia' | 'densityKgM3' | 'qty' | 'weldingMeters' | 'remarks'
+      'projectType' | 'areaSection' | 'itemDetails' | 'lengthMm' | 'widthMm' | 'thkDia' | 'barLengthMm' | 'densityKgM3' | 'qty' | 'weldingMeters' | 'remarks'
     >,
   ) => void;
   adminProjectsPageSummary: { totalProjects: number; totalEntries: number; activeMembers: number } | null;
@@ -2644,6 +2674,7 @@ export function DashboardPage({
                   handleCreateUserProjectEntry={handleCreateUserProjectEntry}
                   handleUpdateProject={handleUpdateProject}
                   handleUpdateUserProjectEntry={handleUpdateUserProjectEntry}
+                  handleDeleteUserProjectEntry={onDeleteProjectEntry}
                   requestedProjectId={requestedUserProjectId}
                   onRequestedProjectHandled={() => setRequestedUserProjectId(null)}
                 />
