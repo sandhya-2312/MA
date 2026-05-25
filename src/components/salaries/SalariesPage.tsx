@@ -41,7 +41,7 @@ type SalariesPageProps = {
 };
 
 export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps) {
-  const canEdit = role === 'Admin' || role === 'User';
+  const canEdit = role === 'Admin';
   const now = new Date();
 
   const [month, setMonth] = useState(now.getMonth() + 1);

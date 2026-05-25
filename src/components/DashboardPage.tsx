@@ -1293,12 +1293,14 @@ export function DashboardPage({
                     </span>
                   </button>
                 )}
-                <button type="button" onClick={() => setActiveTab('payroll')} className={navButtonClass('payroll')}>
-                  <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
-                    <IconNavPayroll />
-                    {!sidebarCollapsed && 'Salaries'}
-                  </span>
-                </button>
+                {isAdmin && (
+                  <button type="button" onClick={() => setActiveTab('payroll')} className={navButtonClass('payroll')}>
+                    <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
+                      <IconNavPayroll />
+                      {!sidebarCollapsed && 'Salaries'}
+                    </span>
+                  </button>
+                )}
                 <button type="button" onClick={() => setActiveTab('profile')} className={navButtonClass('profile')}>
                   <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
                     <IconNavProfile />
@@ -1372,19 +1374,21 @@ export function DashboardPage({
                     </span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('payroll');
-                    closeMobileNav();
-                  }}
-                  className={navButtonClass('payroll')}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <IconNavPayroll />
-                    Salaries
-                  </span>
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('payroll');
+                      closeMobileNav();
+                    }}
+                    className={navButtonClass('payroll')}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <IconNavPayroll />
+                      Salaries
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -2749,7 +2753,7 @@ export function DashboardPage({
             />
           )}
 
-          {activeTab === 'payroll' && (
+          {isAdmin && activeTab === 'payroll' && (
             <PayrollPage accessToken={accessToken} role={loggedInUser.role} onStatus={onStatus} />
           )}
 

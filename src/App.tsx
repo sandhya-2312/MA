@@ -1012,8 +1012,11 @@ export default function App() {
   useEffect(() => {
     if (!auth || auth.firstLogin) return;
     const pathState = getPathState(window.location.pathname);
-    const allowMembers = auth.role === 'Admin';
-    const nextTab = !allowMembers && pathState.tab === 'members' ? 'dashboard' : pathState.tab;
+    const isAdmin = auth.role === 'Admin';
+    let nextTab = pathState.tab;
+    if (!isAdmin && (nextTab === 'members' || nextTab === 'payroll')) {
+      nextTab = 'dashboard';
+    }
     if (nextTab === 'projectSummary') {
       setSummaryProjectId(pathState.summaryProjectId);
       setActiveTab('projectSummary');
