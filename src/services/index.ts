@@ -5,3 +5,4 @@ export * from './authApi.ts';
 export * from './dashboardApi.ts';
 export * from './projectsApi.ts';
 export * from './usersApi.ts';
+export * from './payrollApi.ts';

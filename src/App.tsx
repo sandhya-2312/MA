@@ -42,6 +42,7 @@ function getPathState(pathname: string): { tab: NavTab; summaryProjectId: number
   if (clean === '/projects' || clean === '/projects/') return { tab: 'projects', summaryProjectId: null };
   if (clean === '/members' || clean === '/members/') return { tab: 'members', summaryProjectId: null };
   if (clean === '/profile' || clean === '/profile/') return { tab: 'profile', summaryProjectId: null };
+  if (clean === '/payroll' || clean === '/payroll/') return { tab: 'payroll', summaryProjectId: null };
   if (clean === '/dashboard' || clean === '/dashboard/' || clean === '/' || clean === '') {
     return { tab: 'dashboard', summaryProjectId: null };
   }
@@ -57,6 +58,7 @@ function getPathForState(activeTab: NavTab, summaryProjectId: number | null): st
   if (activeTab === 'projects' || activeTab === 'projectSummary') return '/projects';
   if (activeTab === 'members') return '/members';
   if (activeTab === 'profile') return '/profile';
+  if (activeTab === 'payroll') return '/payroll';
   return '/dashboard';
 }
 
@@ -1170,6 +1172,8 @@ export default function App() {
       onClearAdminProjectSearch={handleClearAdminProjectSearch}
       onDeleteProjectEntry={handleDeleteUserProjectEntry}
       onExportProjectReport={handleExportProjectReport}
+      accessToken={auth.accessToken}
+      onStatus={setStatus}
     />
   );
 }

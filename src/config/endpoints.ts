@@ -16,4 +16,11 @@ export const API_ENDPOINTS = {
   adminProjectsStats: '/admin/projects/stats',
   adminProject: (projectId: number) => `/admin/projects/${projectId}`,
   projectReport: (projectId: number) => `/reports/project/${projectId}/summary`,
+  payrollModules: '/payroll/modules',
+  payrollModuleResolve: '/payroll/modules/resolve',
+  payrollLocations: '/payroll/locations',
+  payrollModule: (moduleId: number) => `/payroll/modules/${moduleId}`,
+  payrollModuleExport: (moduleId: number) => `/payroll/modules/${moduleId}/export`,
+  payrollModuleEmployees: (moduleId: number) => `/payroll/modules/${moduleId}/employees`,
+  payrollEmployee: (employeeId: number) => `/payroll/employees/${employeeId}`,
 } as const;

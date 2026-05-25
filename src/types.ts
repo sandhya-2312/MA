@@ -1,5 +1,5 @@
 export type Role = 'Admin' | 'User' | 'Viewer';
-export type NavTab = 'dashboard' | 'projects' | 'members' | 'profile' | 'projectSummary';
+export type NavTab = 'dashboard' | 'projects' | 'members' | 'profile' | 'projectSummary' | 'payroll';
 
 export type UserAccount = {
   id: number;

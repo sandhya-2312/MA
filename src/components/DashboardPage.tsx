@@ -11,6 +11,7 @@ import {
   type CreateProjectPayload,
 } from './CreateProjectForm';
 import { MembersSection } from './MembersSection';
+import { PayrollPage } from './PayrollPage.tsx';
 import { ProfilePage } from './ProfilePage';
 import { UserProjectsSection } from './UserProjectsSection';
 import { roleLabel } from '../roleLabel';
@@ -59,6 +60,14 @@ function IconNavProfile() {
     <svg viewBox="0 0 24 24" className={navIconClass} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
       <circle cx="12" cy="8" r="4" />
       <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconNavPayroll() {
+  return (
+    <svg viewBox="0 0 24 24" className={navIconClass} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -580,6 +589,8 @@ type DashboardPageProps = {
   onClearAdminProjectSearch: () => Promise<void>;
   onDeleteProjectEntry: (projectId: number, dataId: number) => Promise<void>;
   onExportProjectReport: (projectId: number) => Promise<void>;
+  accessToken: string;
+  onStatus: (message: string) => void;
 };
 
 export function DashboardPage({
@@ -657,6 +668,8 @@ export function DashboardPage({
   onClearAdminProjectSearch,
   onDeleteProjectEntry,
   onExportProjectReport,
+  accessToken,
+  onStatus,
 }: DashboardPageProps) {
   const [showDashboardCreateUser, setShowDashboardCreateUser] = useState(false);
   const [showDashboardCreateProject, setShowDashboardCreateProject] = useState(false);
@@ -738,7 +751,9 @@ export function DashboardPage({
               : 'My Projects'
             : activeTab === 'members'
               ? 'Members'
-              : 'Profile';
+              : activeTab === 'payroll'
+                ? 'Salaries'
+                : 'Profile';
 
   const headerDisplayName =
     loggedInUser.role === 'Admin' ? 'Admin' : loggedInUser.fullName?.trim() || loggedInUser.username;
@@ -1278,6 +1293,12 @@ export function DashboardPage({
                     </span>
                   </button>
                 )}
+                <button type="button" onClick={() => setActiveTab('payroll')} className={navButtonClass('payroll')}>
+                  <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
+                    <IconNavPayroll />
+                    {!sidebarCollapsed && 'Salaries'}
+                  </span>
+                </button>
                 <button type="button" onClick={() => setActiveTab('profile')} className={navButtonClass('profile')}>
                   <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
                     <IconNavProfile />
@@ -1351,6 +1372,19 @@ export function DashboardPage({
                     </span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('payroll');
+                    closeMobileNav();
+                  }}
+                  className={navButtonClass('payroll')}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <IconNavPayroll />
+                    Salaries
+                  </span>
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -2713,6 +2747,10 @@ export function DashboardPage({
               setEditingMemberId={setEditingMemberId}
               handleDeleteMember={handleDeleteMember}
             />
+          )}
+
+          {activeTab === 'payroll' && (
+            <PayrollPage accessToken={accessToken} role={loggedInUser.role} onStatus={onStatus} />
           )}
 
           {activeTab === 'profile' && (

@@ -19,6 +19,7 @@ A React + TypeScript dashboard built with Vite for managing projects, members, a
 - Viewer dashboard: read-only access to assigned project data
 - Submission tracking and trend visualizations backed by production dashboard APIs
 - Tonnage comparison bar charts (`Total Tonnage` vs `Actual Tonnage`) on Dashboard and Project Summary
+- Attendance & Salaries (MC.Engg monthly sheets): create monthly modules, mark daily attendance (`1` / `A`), wages, advances, and final payment totals
 - Project Summary actions:
   - Export report (CSV)
   - Delete individual line entries

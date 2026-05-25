@@ -23,3 +23,28 @@
     @apply flex min-h-full min-h-dvh flex-col;
   }
 }
+
+@media print {
+  aside,
+  .salaries-toolbar,
+  .salaries-toolbar-wrap,
+  .salaries-page > header,
+  nav,
+  button {
+    display: none !important;
+  }
+  .salaries-page {
+    padding: 0;
+  }
+  .salaries-sheet {
+    max-height: none !important;
+    overflow: visible !important;
+    border: 1px solid #000;
+  }
+  .salaries-table {
+    font-size: 9px;
+  }
+  .salaries-table thead {
+    position: static !important;
+  }
+}
