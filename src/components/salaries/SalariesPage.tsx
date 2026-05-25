@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PayrollEmployeeBody, PayrollEmployeeRow, PayrollModuleDetail } from '../../services/payrollApi.ts';
 import {
   addPayrollEmployee,
   createPayrollModule,
-  exportPayrollModule,
   listPayrollLocations,
   resolvePayrollModule,
   updatePayrollEmployee,
 } from '../../services/payrollApi.ts';
 import { DEFAULT_PROJECTS, MONTH_OPTIONS, nextAttendanceCode } from '../../utils/payroll.ts';
-import { downloadPayrollCsv } from '../../utils/payrollExport.ts';
+import {
+  downloadPayrollCsv,
+  preparePayrollExport,
+  revokePayrollExportUrl,
+  savePayrollExportWithPicker,
+  tryAutoDownload,
+} from '../../utils/payrollExport.ts';
+import { printSalariesSheet } from '../../utils/payrollPrint.ts';
 import type { Role } from '../../types';
 import { SalariesToolbar } from './SalariesToolbar.tsx';
 import { SalaryAttendanceTable } from './SalaryAttendanceTable.tsx';
@@ -40,6 +46,7 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
 
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [yearInput, setYearInput] = useState(String(now.getFullYear()));
   const [project, setProject] = useState(DEFAULT_PROJECTS[0]);
   const [projectInput, setProjectInput] = useState(DEFAULT_PROJECTS[0]);
   const [projects, setProjects] = useState<string[]>(DEFAULT_PROJECTS);
@@ -50,6 +57,11 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   const [dirty, setDirty] = useState(false);
   const [search, setSearch] = useState('');
   const [designationFilter, setDesignationFilter] = useState('');
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [exportDownload, setExportDownload] = useState<{ url: string; filename: string } | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const exportUrlRef = useRef<string | null>(null);
+  const exportNoticeRef = useRef<HTMLDivElement | null>(null);
 
   const loadSheet = useCallback(async () => {
     setLoading(true);
@@ -78,6 +90,10 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
         setProject(resolved.location.trim());
         setProjectInput(resolved.location.trim());
       }
+      if (resolved) {
+        setYear(resolved.year);
+        setYearInput(String(resolved.year));
+      }
       setDirty(false);
     } catch (error) {
       setDetail(null);
@@ -91,6 +107,10 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   useEffect(() => {
     void loadSheet();
   }, [loadSheet]);
+
+  useEffect(() => {
+    return () => revokePayrollExportUrl(exportUrlRef.current);
+  }, []);
 
   const designations = useMemo(() => {
     const set = new Set<string>();
@@ -173,29 +193,81 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
 
   const handleExport = async () => {
     if (!detail) return;
+    setExportNotice(null);
+    revokePayrollExportUrl(exportUrlRef.current);
+    exportUrlRef.current = null;
+    setExportDownload(null);
+    setExporting(true);
     try {
-      await exportPayrollModule(accessToken, detail.id);
-      onStatus('Export downloaded.');
-    } catch {
-      downloadPayrollCsv({ ...detail, employees });
-      onStatus('Export downloaded (CSV).');
+      const prepared = await preparePayrollExport(detail, employees);
+      exportUrlRef.current = prepared.downloadUrl;
+      setExportDownload({ url: prepared.downloadUrl, filename: prepared.filename });
+
+      const savedWithPicker = await savePayrollExportWithPicker(prepared.blob, prepared.filename);
+      if (!savedWithPicker) {
+        tryAutoDownload(prepared.blob, prepared.filename);
+      }
+
+      const msg = savedWithPicker
+        ? `Saved ${prepared.filename}.`
+        : 'Excel ready — click the green button below to save the file.';
+      setExportNotice(msg);
+      onStatus(msg);
+      requestAnimationFrame(() => {
+        exportNoticeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    } catch (error) {
+      try {
+        downloadPayrollCsv(detail, employees);
+        const msg = 'Downloaded CSV fallback — open from Downloads (Ctrl+J).';
+        setExportNotice(msg);
+        onStatus(msg);
+      } catch {
+        const msg = error instanceof Error ? error.message : 'Export failed';
+        setExportNotice(msg);
+        onStatus(msg);
+      }
+    } finally {
+      setExporting(false);
     }
   };
 
   const handlePrint = () => {
-    window.print();
+    if (dirty && canEdit) {
+      const proceed = window.confirm('You have unsaved changes. Print anyway?');
+      if (!proceed) return;
+    }
+    printSalariesSheet();
   };
 
-  const applyProject = () => {
-    const trimmed = projectInput.trim();
-    if (!trimmed) {
+  const monthLabel = MONTH_OPTIONS.find((m) => m.value === month)?.label ?? String(month);
+
+  const yearSuggestions = useMemo(() => {
+    const base = year;
+    return Array.from({ length: 7 }, (_, i) => base - 3 + i);
+  }, [year]);
+
+  const applySheetFilters = () => {
+    let nextProject = project;
+    const trimmedProject = projectInput.trim();
+    if (!trimmedProject) {
       setProjectInput(project);
+    } else if (trimmedProject !== project) {
+      nextProject = trimmedProject;
+      setProject(trimmedProject);
+      setProjects((prev) => (prev.includes(trimmedProject) ? prev : [trimmedProject, ...prev]));
+    }
+
+    const parsedYear = Number.parseInt(yearInput.trim(), 10);
+    if (!Number.isFinite(parsedYear) || parsedYear < 2000 || parsedYear > 2100) {
+      setYearInput(String(year));
       return;
     }
-    if (trimmed !== project) {
-      setProject(trimmed);
-      setProjects((prev) => (prev.includes(trimmed) ? prev : [trimmed, ...prev]));
-    }
+
+    const projectChanged = nextProject !== project;
+    const yearChanged = parsedYear !== year;
+    if (yearChanged) setYear(parsedYear);
+    if (!projectChanged && !yearChanged) return;
   };
 
   if (loading) {
@@ -221,10 +293,39 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
         <p className="text-sm text-slate-600">Industrial payroll · attendance register · MC.Engg format</p>
       </header>
 
+      {exportNotice && (
+        <div
+          ref={exportNoticeRef}
+          role="status"
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            exportNotice.startsWith('Export failed')
+              ? 'border-rose-200 bg-rose-50 text-rose-900'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+          }`}
+        >
+          <p>{exportNotice}</p>
+          {exportDownload && !exportNotice.startsWith('Export failed') && (
+            <p className="mt-2 text-xs text-emerald-800">
+              Look for <strong>{exportDownload.filename}</strong> in your Downloads folder (Ctrl+J in Chrome).
+            </p>
+          )}
+          {exportDownload && !exportNotice.startsWith('Export failed') && (
+            <a
+              href={exportDownload.url}
+              download={exportDownload.filename}
+              className="mt-3 inline-flex items-center gap-2 rounded-md bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-emerald-800"
+            >
+              Save {exportDownload.filename}
+            </a>
+          )}
+        </div>
+      )}
+
       <div className="salaries-toolbar-wrap">
         <SalariesToolbar
           month={month}
-          year={year}
+          yearInput={yearInput}
+          yearSuggestions={yearSuggestions}
           projectInput={projectInput}
           projects={projects}
           search={search}
@@ -234,25 +335,36 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
           dirty={dirty}
           saving={saving}
           onMonthChange={setMonth}
-          onYearChange={setYear}
+          onYearInputChange={setYearInput}
           onProjectInputChange={setProjectInput}
-          onProjectApply={applyProject}
+          onSheetApply={applySheetFilters}
           onSearchChange={setSearch}
           onDesignationFilterChange={setDesignationFilter}
           onAddEmployee={() => void handleAddEmployee()}
           onSave={() => void handleSave()}
+          exporting={exporting}
           onExport={() => void handleExport()}
           onPrint={handlePrint}
         />
       </div>
 
-      <SalaryAttendanceTable
-        detail={detail}
-        rows={filteredRows}
-        canEdit={canEdit}
-        onToggleDay={toggleDay}
-        onPatchRow={patchRow}
-      />
+      <div className="salaries-print-target">
+        <div className="salaries-print-meta hidden">
+          <p className="text-sm font-bold text-slate-900">{detail.title}</p>
+          <p className="text-xs text-slate-600">
+            {monthLabel} {year} · {project} · Printed {new Date().toLocaleString('en-IN')}
+          </p>
+        </div>
+        <SalaryAttendanceTable
+          detail={detail}
+          month={month}
+          year={year}
+          rows={filteredRows}
+          canEdit={canEdit}
+          onToggleDay={toggleDay}
+          onPatchRow={patchRow}
+        />
+      </div>
 
       {dirty && canEdit && (
         <p className="print:hidden text-xs font-medium text-amber-700">Unsaved changes — click Save Attendance before leaving.</p>

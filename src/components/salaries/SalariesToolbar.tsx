@@ -1,6 +1,7 @@
 type SalariesToolbarProps = {
   month: number;
-  year: number;
+  yearInput: string;
+  yearSuggestions: number[];
   projectInput: string;
   projects: string[];
   search: string;
@@ -9,10 +10,11 @@ type SalariesToolbarProps = {
   canEdit: boolean;
   dirty: boolean;
   saving: boolean;
+  exporting: boolean;
   onMonthChange: (month: number) => void;
-  onYearChange: (year: number) => void;
+  onYearInputChange: (year: string) => void;
   onProjectInputChange: (project: string) => void;
-  onProjectApply: () => void;
+  onSheetApply: () => void;
   onSearchChange: (value: string) => void;
   onDesignationFilterChange: (value: string) => void;
   onAddEmployee: () => void;
@@ -28,7 +30,8 @@ const MONTHS = [
 
 export function SalariesToolbar({
   month,
-  year,
+  yearInput,
+  yearSuggestions,
   projectInput,
   projects,
   search,
@@ -37,10 +40,11 @@ export function SalariesToolbar({
   canEdit,
   dirty,
   saving,
+  exporting,
   onMonthChange,
-  onYearChange,
+  onYearInputChange,
   onProjectInputChange,
-  onProjectApply,
+  onSheetApply,
   onSearchChange,
   onDesignationFilterChange,
   onAddEmployee,
@@ -48,7 +52,7 @@ export function SalariesToolbar({
   onExport,
   onPrint,
 }: SalariesToolbarProps) {
-  const yearOptions = Array.from({ length: 7 }, (_, i) => year - 3 + i);
+  const commitSheet = () => onSheetApply();
 
   return (
     <div className="salaries-toolbar rounded-lg border border-slate-300 bg-gradient-to-b from-slate-50 to-white p-4 shadow-sm">
@@ -70,17 +74,28 @@ export function SalariesToolbar({
           </label>
           <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
             Year
-            <select
-              value={year}
-              onChange={(e) => onYearChange(Number(e.target.value))}
-              className="min-w-[5.5rem] rounded border border-slate-300 bg-white px-2.5 py-2 text-sm font-medium text-slate-900 shadow-sm"
-            >
-              {yearOptions.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
+            <input
+              type="number"
+              list="salary-year-suggestions"
+              min={2000}
+              max={2100}
+              value={yearInput}
+              onChange={(e) => onYearInputChange(e.target.value)}
+              onBlur={commitSheet}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitSheet();
+                }
+              }}
+              placeholder="e.g. 2026"
+              className="min-w-[5.5rem] rounded border border-slate-300 bg-white px-2.5 py-2 text-sm font-medium text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+            />
+            <datalist id="salary-year-suggestions">
+              {yearSuggestions.map((y) => (
+                <option key={y} value={y} />
               ))}
-            </select>
+            </datalist>
           </label>
           <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
             Project
@@ -89,11 +104,11 @@ export function SalariesToolbar({
               list="salary-project-suggestions"
               value={projectInput}
               onChange={(e) => onProjectInputChange(e.target.value)}
-              onBlur={onProjectApply}
+              onBlur={commitSheet}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  onProjectApply();
+                  commitSheet();
                 }
               }}
               placeholder="e.g. Maruti -1 Drydock"
@@ -154,9 +169,10 @@ export function SalariesToolbar({
           <button
             type="button"
             onClick={onExport}
-            className="rounded border border-emerald-600 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100"
+            disabled={exporting}
+            className="rounded border border-emerald-600 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-60"
           >
-            Export to Excel
+            {exporting ? 'Preparing Excel…' : 'Export to Excel'}
           </button>
           <button
             type="button"
@@ -172,7 +188,7 @@ export function SalariesToolbar({
         <span className="font-semibold text-rose-700">A</span> Absent ·{' '}
         <span className="font-semibold text-amber-700">H</span> Half ·{' '}
         <span className="font-semibold text-violet-700">OT</span> Overtime day · Press{' '}
-        <span className="font-semibold">Enter</span> or click away from Project to load that sheet
+        <span className="font-semibold">Enter</span> or click away from Project / Year to load that sheet
       </p>
     </div>
   );

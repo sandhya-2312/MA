@@ -99,8 +99,9 @@ export function createPayrollModule(token: string, body: PayrollModuleCreateBody
   });
 }
 
-export function exportPayrollModule(token: string, moduleId: number) {
-  return downloadAuthenticatedBlob(API_ENDPOINTS.payrollModuleExport(moduleId), token);
+export async function exportPayrollModule(token: string, moduleId: number, filename: string) {
+  const blob = await downloadAuthenticatedBlob(API_ENDPOINTS.payrollModuleExport(moduleId), token);
+  return { blob, filename };
 }
 
 export function deletePayrollModule(token: string, moduleId: number) {

@@ -25,26 +25,118 @@
 }
 
 @media print {
-  aside,
-  .salaries-toolbar,
-  .salaries-toolbar-wrap,
-  .salaries-page > header,
-  nav,
-  button {
+  @page {
+    size: landscape;
+    margin: 6mm;
+  }
+
+  body.salaries-print-active {
+    background: #fff !important;
+  }
+
+  /* Hide entire app chrome; show only the salary sheet */
+  body.salaries-print-active #app > * {
+    visibility: hidden;
+  }
+
+  body.salaries-print-active .salaries-print-target,
+  body.salaries-print-active .salaries-print-target * {
+    visibility: visible;
+  }
+
+  body.salaries-print-active .salaries-print-target {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+  }
+
+  body.salaries-print-active .salaries-print-meta {
+    display: block !important;
+    margin-bottom: 4px;
+  }
+
+  body.salaries-print-active .salaries-page > header,
+  body.salaries-print-active .salaries-toolbar-wrap,
+  body.salaries-print-active .salaries-toolbar,
+  body.salaries-print-active button,
+  body.salaries-print-active aside,
+  body.salaries-print-active nav {
     display: none !important;
   }
-  .salaries-page {
-    padding: 0;
-  }
-  .salaries-sheet {
+
+  body.salaries-print-active .salaries-sheet {
     max-height: none !important;
     overflow: visible !important;
-    border: 1px solid #000;
+    border: 1px solid #000 !important;
+    box-shadow: none !important;
   }
-  .salaries-table {
-    font-size: 9px;
+
+  body.salaries-print-active .salaries-sheet-scroll {
+    max-height: none !important;
+    overflow: visible !important;
   }
-  .salaries-table thead {
+
+  body.salaries-print-active .salaries-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 7pt !important;
+    page-break-inside: auto;
+  }
+
+  body.salaries-print-active .salaries-table thead {
     position: static !important;
+    display: table-header-group;
+  }
+
+  body.salaries-print-active .salaries-table tr {
+    page-break-inside: avoid;
+  }
+
+  body.salaries-print-active .salaries-table th,
+  body.salaries-print-active .salaries-table td {
+    position: static !important;
+    left: auto !important;
+    border: 1px solid #333 !important;
+    padding: 1px 2px !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.salaries-print-active .salaries-table input {
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    font-size: inherit !important;
+    color: #000 !important;
+  }
+
+  body.salaries-print-active .salaries-table button {
+    display: flex !important;
+    border: none !important;
+    min-height: 0 !important;
+    height: auto !important;
+    width: auto !important;
+    padding: 0 !important;
+    background: transparent !important;
+    color: #000 !important;
+    font-size: inherit !important;
+  }
+
+  /* Preserve attendance colour codes when printing */
+  body.salaries-print-active .salaries-table button.bg-emerald-100 {
+    background-color: #d1fae5 !important;
+  }
+  body.salaries-print-active .salaries-table button.bg-rose-100 {
+    background-color: #ffe4e6 !important;
+  }
+  body.salaries-print-active .salaries-table .salaries-sunday,
+  body.salaries-print-active .salaries-table button.bg-amber-100 {
+    background-color: #fef3c7 !important;
+  }
+  body.salaries-print-active .salaries-table button.bg-violet-100 {
+    background-color: #ede9fe !important;
   }
 }

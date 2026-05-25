@@ -21,14 +21,48 @@ export const MONTH_OPTIONS = [
 
 export const DEFAULT_PROJECTS = ['Maruti -1 Drydock', 'Maruti -2 Drydock', 'Yard Office'];
 
+/** `month` is 1–12 (January = 1, December = 12) from the month selector. */
+export function toMonthIndex(month: number): number {
+  return month - 1;
+}
+
 export function daysInMonth(year: number, month: number): number {
-  return new Date(year, month, 0).getDate();
+  const monthIndex = toMonthIndex(month);
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+export type MonthDayMeta = {
+  day: number;
+  weekday: string;
+  isSunday: boolean;
+};
+
+export function buildMonthCalendar(year: number, month: number): {
+  daysInMonth: number;
+  days: MonthDayMeta[];
+  weekdayLabels: string[];
+} {
+  const monthIndex = toMonthIndex(month);
+  const daysInMonthCount = daysInMonth(year, month);
+  const days: MonthDayMeta[] = Array.from({ length: daysInMonthCount }, (_, index) => {
+    const day = index + 1;
+    const dateObj = new Date(year, monthIndex, day);
+    const weekday = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+    return {
+      day,
+      weekday,
+      isSunday: dateObj.getDay() === 0,
+    };
+  });
+  return {
+    daysInMonth: daysInMonthCount,
+    days,
+    weekdayLabels: days.map((d) => d.weekday),
+  };
 }
 
 export function weekdayLabels(year: number, month: number): string[] {
-  const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const count = daysInMonth(year, month);
-  return Array.from({ length: count }, (_, i) => labels[new Date(year, month - 1, i + 1).getDay()]);
+  return buildMonthCalendar(year, month).weekdayLabels;
 }
 
 export function normalizeAttendanceCode(raw: string | undefined | null): AttendanceCode {

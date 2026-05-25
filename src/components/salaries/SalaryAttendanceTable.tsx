@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import type { PayrollEmployeeRow, PayrollModuleDetail } from '../../services/payrollApi.ts';
 import {
   attendanceCellClass,
+  buildMonthCalendar,
   calcFinalPayment,
   countTotalDays,
   formatInr,
@@ -9,24 +11,35 @@ import {
 
 type SalaryAttendanceTableProps = {
   detail: PayrollModuleDetail;
+  month: number;
+  year: number;
   rows: PayrollEmployeeRow[];
   canEdit: boolean;
   onToggleDay: (employeeId: number, day: number) => void;
   onPatchRow: (employeeId: number, patch: Partial<PayrollEmployeeRow>) => void;
 };
 
-export function SalaryAttendanceTable({ detail, rows, canEdit, onToggleDay, onPatchRow }: SalaryAttendanceTableProps) {
-  const days = Array.from({ length: detail.days_in_month }, (_, i) => i + 1);
+export function SalaryAttendanceTable({
+  detail,
+  month,
+  year,
+  rows,
+  canEdit,
+  onToggleDay,
+  onPatchRow,
+}: SalaryAttendanceTableProps) {
+  const calendar = useMemo(() => buildMonthCalendar(year, month), [year, month]);
+  const days = calendar.days;
   const totalPayment = rows.reduce((sum, row) => sum + calcFinalPayment(row), 0);
 
   return (
-    <div className="salaries-sheet overflow-hidden rounded-lg border border-slate-400 bg-white shadow-md">
+    <div className="salaries-sheet overflow-hidden rounded-lg border border-slate-400 bg-white shadow-md print:overflow-visible print:rounded-none print:shadow-none">
       <div className="border-b border-slate-300 bg-sky-100/80 px-4 py-2.5 text-center">
         <h3 className="text-sm font-bold tracking-tight text-slate-900 sm:text-base">{detail.title}</h3>
       </div>
-      <div className="max-h-[calc(100vh-18rem)] overflow-auto">
-        <table className="salaries-table w-full min-w-[1100px] border-collapse text-[11px]">
-          <thead className="sticky top-0 z-20">
+      <div className="salaries-sheet-scroll max-h-[calc(100vh-18rem)] overflow-auto print:max-h-none print:overflow-visible">
+        <table className="salaries-table w-full min-w-[1100px] border-collapse text-[11px] print:min-w-0 print:text-[8px]">
+          <thead className="sticky top-0 z-20 print:static">
             <tr className="bg-slate-200 text-slate-800">
               <th className="sticky left-0 z-30 min-w-[2.25rem] border border-slate-400 bg-slate-200 px-1 py-1">S.No</th>
               <th className="sticky left-[2.25rem] z-30 min-w-[7rem] border border-slate-400 bg-slate-200 px-1.5 py-1 text-left">
@@ -35,17 +48,14 @@ export function SalaryAttendanceTable({ detail, rows, canEdit, onToggleDay, onPa
               <th className="sticky left-[9.25rem] z-30 min-w-[5.5rem] border border-slate-400 bg-slate-200 px-1.5 py-1 text-left">
                 Designation
               </th>
-              {days.map((day) => {
-                const isSunday = detail.weekday_labels[day - 1] === 'Sun';
-                return (
-                  <th
-                    key={`wd-${day}`}
-                    className={`min-w-[1.75rem] border border-slate-400 px-0 py-0.5 text-center font-normal ${isSunday ? 'bg-amber-200/90' : ''}`}
-                  >
-                    {detail.weekday_labels[day - 1]}
-                  </th>
-                );
-              })}
+              {days.map(({ day, weekday, isSunday }) => (
+                <th
+                  key={`wd-${day}`}
+                  className={`min-w-[1.75rem] border border-slate-400 px-0 py-0.5 text-center font-normal ${isSunday ? 'salaries-sunday bg-amber-200/90' : ''}`}
+                >
+                  {weekday}
+                </th>
+              ))}
               <th className="min-w-[3rem] border border-slate-400 px-1 py-1">OT</th>
               <th className="min-w-[3.5rem] border border-slate-400 px-1 py-1">Total Days</th>
               <th className="min-w-[3.5rem] border border-slate-400 px-1 py-1">Advance</th>
@@ -58,17 +68,14 @@ export function SalaryAttendanceTable({ detail, rows, canEdit, onToggleDay, onPa
               <th className="sticky left-0 z-30 border border-slate-400 bg-slate-100" />
               <th className="sticky left-[2.25rem] z-30 border border-slate-400 bg-slate-100" />
               <th className="sticky left-[9.25rem] z-30 border border-slate-400 bg-slate-100" />
-              {days.map((day) => {
-                const isSunday = detail.weekday_labels[day - 1] === 'Sun';
-                return (
-                  <th
-                    key={`d-${day}`}
-                    className={`border border-slate-400 py-0.5 text-center font-semibold ${isSunday ? 'bg-amber-100' : ''}`}
-                  >
-                    {day}
-                  </th>
-                );
-              })}
+              {days.map(({ day, isSunday }) => (
+                <th
+                  key={`d-${day}`}
+                  className={`border border-slate-400 py-0.5 text-center font-semibold ${isSunday ? 'salaries-sunday bg-amber-100' : ''}`}
+                >
+                  {day}
+                </th>
+              ))}
               <th className="border border-slate-400" colSpan={6} />
             </tr>
           </thead>
@@ -105,11 +112,10 @@ export function SalaryAttendanceTable({ detail, rows, canEdit, onToggleDay, onPa
                         className="w-full min-w-0 border-0 bg-transparent px-0.5 py-0.5 focus:outline focus:outline-1 focus:outline-sky-500"
                       />
                     </td>
-                    {days.map((day) => {
-                      const isSunday = detail.weekday_labels[day - 1] === 'Sun';
+                    {days.map(({ day, isSunday }) => {
                       const code = normalizeAttendanceCode((row.attendance ?? {})[String(day)]);
                       return (
-                        <td key={`${row.id}-${day}`} className={`border border-slate-300 p-0 text-center ${isSunday ? 'bg-amber-50/80' : ''}`}>
+                        <td key={`${row.id}-${day}`} className={`border border-slate-300 p-0 text-center ${isSunday ? 'salaries-sunday bg-amber-50/80' : ''}`}>
                           <button
                             type="button"
                             disabled={!canEdit}
@@ -180,7 +186,7 @@ export function SalaryAttendanceTable({ detail, rows, canEdit, onToggleDay, onPa
               <td colSpan={3} className="sticky left-0 z-10 border border-slate-400 bg-slate-200 px-2 py-2 text-right">
                 Monthly Total
               </td>
-              {days.map((day) => (
+              {days.map(({ day }) => (
                 <td key={`tot-${day}`} className="border border-slate-400" />
               ))}
               <td colSpan={5} className="border border-slate-400 px-2 py-2 text-right">
