@@ -56,6 +56,7 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingEmployeeId, setDeletingEmployeeId] = useState<number | null>(null);
+  const [deleteConfirmEmployeeId, setDeleteConfirmEmployeeId] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [search, setSearch] = useState('');
   const [designationFilter, setDesignationFilter] = useState('');
@@ -173,14 +174,13 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
     }
   };
 
-  const handleDeleteEmployee = async (employeeId: number) => {
+  const requestDeleteEmployee = (employeeId: number) => {
     if (!detail || !canEdit) return;
-    const row = employees.find((r) => r.id === employeeId);
-    const displayName = row?.name?.trim() ? ` (${row.name.trim()})` : '';
+    setDeleteConfirmEmployeeId(employeeId);
+  };
 
-    const ok = window.confirm(`Remove employee${displayName}? This row will be deleted.`);
-    if (!ok) return;
-
+  const confirmDeleteEmployee = async (employeeId: number) => {
+    setDeleteConfirmEmployeeId(null);
     setDeletingEmployeeId(employeeId);
     try {
       await deletePayrollEmployee(accessToken, employeeId);
@@ -391,13 +391,64 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
           canEdit={canEdit}
           onToggleDay={toggleDay}
           onPatchRow={patchRow}
-          onDeleteEmployee={handleDeleteEmployee}
+          onDeleteEmployee={requestDeleteEmployee}
           deletingEmployeeId={deletingEmployeeId}
         />
       </div>
 
       {dirty && canEdit && (
         <p className="print:hidden text-xs font-medium text-amber-700">Unsaved changes — click Save Attendance before leaving.</p>
+      )}
+
+      {deleteConfirmEmployeeId !== null && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => {
+            // Close only when clicking the overlay itself, not the modal content.
+            if (e.target === e.currentTarget) setDeleteConfirmEmployeeId(null);
+          }}
+        >
+          <div className="w-full max-w-[420px] rounded-lg border border-slate-200 bg-white p-5 shadow-lg">
+            {(() => {
+              const row = employees.find((r) => r.id === deleteConfirmEmployeeId);
+              const name = row?.name?.trim();
+              return (
+                <>
+                  <h3 className="text-base font-bold text-slate-900">Remove employee?</h3>
+                  <p className="mt-2 text-sm text-slate-700">
+                    {name ? (
+                      <>
+                        Remove <span className="font-semibold">{name}</span>? This row will be deleted.
+                      </>
+                    ) : (
+                      'This row will be deleted.'
+                    )}
+                  </p>
+                </>
+              );
+            })()}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                onClick={() => setDeleteConfirmEmployeeId(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void confirmDeleteEmployee(deleteConfirmEmployeeId)}
+                disabled={deletingEmployeeId !== null}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
