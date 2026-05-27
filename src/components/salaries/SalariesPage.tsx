@@ -5,6 +5,7 @@ import {
   createPayrollModule,
   listPayrollLocations,
   resolvePayrollModule,
+  deletePayrollEmployee,
   updatePayrollEmployee,
 } from '../../services/payrollApi.ts';
 import { DEFAULT_PROJECTS, MONTH_OPTIONS, nextAttendanceCode } from '../../utils/payroll.ts';
@@ -54,6 +55,7 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   const [employees, setEmployees] = useState<PayrollEmployeeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingEmployeeId, setDeletingEmployeeId] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [search, setSearch] = useState('');
   const [designationFilter, setDesignationFilter] = useState('');
@@ -168,6 +170,32 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
       onStatus('Employee row added.');
     } catch (error) {
       onStatus(error instanceof Error ? error.message : 'Could not add employee.');
+    }
+  };
+
+  const handleDeleteEmployee = async (employeeId: number) => {
+    if (!detail || !canEdit) return;
+    const row = employees.find((r) => r.id === employeeId);
+    const displayName = row?.name?.trim() ? ` (${row.name.trim()})` : '';
+
+    const ok = window.confirm(`Remove employee${displayName}? This row will be deleted.`);
+    if (!ok) return;
+
+    setDeletingEmployeeId(employeeId);
+    try {
+      await deletePayrollEmployee(accessToken, employeeId);
+
+      setEmployees((rows) => {
+        const next = rows.filter((r) => r.id !== employeeId);
+        // Keep S.No display contiguous after removing a row.
+        return next.map((r, idx) => ({ ...r, serial_no: idx + 1 }));
+      });
+      setDirty(true);
+      onStatus('Employee row removed.');
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : 'Could not remove employee.');
+    } finally {
+      setDeletingEmployeeId(null);
     }
   };
 
@@ -363,6 +391,8 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
           canEdit={canEdit}
           onToggleDay={toggleDay}
           onPatchRow={patchRow}
+          onDeleteEmployee={handleDeleteEmployee}
+          deletingEmployeeId={deletingEmployeeId}
         />
       </div>
 

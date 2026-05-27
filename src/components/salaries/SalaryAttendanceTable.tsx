@@ -17,6 +17,8 @@ type SalaryAttendanceTableProps = {
   canEdit: boolean;
   onToggleDay: (employeeId: number, day: number) => void;
   onPatchRow: (employeeId: number, patch: Partial<PayrollEmployeeRow>) => void;
+  onDeleteEmployee: (employeeId: number) => void;
+  deletingEmployeeId?: number | null;
 };
 
 export function SalaryAttendanceTable({
@@ -27,6 +29,8 @@ export function SalaryAttendanceTable({
   canEdit,
   onToggleDay,
   onPatchRow,
+  onDeleteEmployee,
+  deletingEmployeeId = null,
 }: SalaryAttendanceTableProps) {
   const calendar = useMemo(() => buildMonthCalendar(year, month), [year, month]);
   const days = calendar.days;
@@ -63,6 +67,7 @@ export function SalaryAttendanceTable({
               <th className="min-w-[3rem] border border-slate-400 px-1 py-1">Food</th>
               <th className="min-w-[4.5rem] border border-slate-400 px-1 py-1">Final Payment</th>
               <th className="min-w-[4.5rem] border border-slate-400 px-1 py-1">Remarks</th>
+              <th className="min-w-[4rem] border border-slate-400 px-1 py-1">Remove</th>
             </tr>
             <tr className="bg-slate-100 text-slate-900">
               <th className="sticky left-0 z-30 border border-slate-400 bg-slate-100" />
@@ -76,13 +81,13 @@ export function SalaryAttendanceTable({
                   {day}
                 </th>
               ))}
-              <th className="border border-slate-400" colSpan={6} />
+              <th className="border border-slate-400" colSpan={8} />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={3 + days.length + 6} className="border border-slate-300 px-4 py-8 text-center text-slate-500">
+                <td colSpan={3 + days.length + 8} className="border border-slate-300 px-4 py-8 text-center text-slate-500">
                   No employees match filters. Add an employee or clear filters.
                 </td>
               </tr>
@@ -178,6 +183,17 @@ export function SalaryAttendanceTable({
                         className="w-full min-w-[4rem] border-0 bg-transparent focus:outline focus:outline-1 focus:outline-sky-500"
                       />
                     </td>
+                    <td className="border border-slate-300 px-1 py-0.5 text-center">
+                      <button
+                        type="button"
+                        disabled={!canEdit || deletingEmployeeId === row.id}
+                        onClick={() => onDeleteEmployee(row.id)}
+                        className="rounded border border-rose-500 bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-800 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        title="Remove employee row"
+                      >
+                        {deletingEmployeeId === row.id ? 'Removing…' : 'Delete'}
+                      </button>
+                    </td>
                   </tr>
                 );
               })
@@ -193,6 +209,7 @@ export function SalaryAttendanceTable({
                 Grand Total
               </td>
               <td className="border border-slate-400 px-2 py-2 text-right tabular-nums">{formatInr(totalPayment)}</td>
+              <td className="border border-slate-400" />
               <td className="border border-slate-400" />
             </tr>
           </tbody>
