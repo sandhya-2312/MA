@@ -8,7 +8,14 @@ import {
   deletePayrollEmployee,
   updatePayrollEmployee,
 } from '../../services/payrollApi.ts';
-import { DEFAULT_PROJECTS, MONTH_OPTIONS, nextAttendanceCode } from '../../utils/payroll.ts';
+import {
+  emptyDay,
+  nextAttendanceStatus,
+  parseDayAttendance,
+  serializeDay,
+  type DayAttendance,
+} from '../../utils/attendance.ts';
+import { DEFAULT_PROJECTS, MONTH_OPTIONS, enrichEmployeeRow } from '../../utils/payroll.ts';
 import {
   downloadPayrollCsv,
   preparePayrollExport,
@@ -18,7 +25,14 @@ import {
 } from '../../utils/payrollExport.ts';
 import { printSalariesSheet } from '../../utils/payrollPrint.ts';
 import type { Role } from '../../types';
+import { Toast } from '../ui/Toast.tsx';
+import { createEmptyAttendance, formToEmployeeBody, type EmployeeFormValues } from '../../utils/employeeForm.ts';
+import { EmployeeFormModal } from './EmployeeFormModal.tsx';
 import { SalariesToolbar } from './SalariesToolbar.tsx';
+import { buildBulkShareText } from '../../utils/payrollShare.ts';
+import { BulkShareModal } from './BulkShareModal.tsx';
+import { PayslipModal } from './PayslipModal.tsx';
+import { OtHoursPopup } from './OtHoursPopup.tsx';
 import { SalaryAttendanceTable } from './SalaryAttendanceTable.tsx';
 
 function employeeToBody(row: PayrollEmployeeRow): PayrollEmployeeBody {
@@ -30,8 +44,18 @@ function employeeToBody(row: PayrollEmployeeRow): PayrollEmployeeBody {
     ot: row.ot,
     advance: row.advance,
     wage: row.wage,
+    monthly_salary: row.monthly_salary ?? 0,
     food: row.food,
     remarks: row.remarks,
+    contact_number: row.contact_number ?? null,
+    email: row.email ?? null,
+    address: row.address ?? null,
+    project: row.project ?? null,
+    joining_date: row.joining_date ?? null,
+    bank_name: row.bank_name ?? null,
+    account_number: row.account_number ?? null,
+    ifsc_code: row.ifsc_code ?? null,
+    upi_id: row.upi_id ?? null,
   };
 }
 
@@ -63,8 +87,41 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [exportDownload, setExportDownload] = useState<{ url: string; filename: string } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [employeeModalOpen, setEmployeeModalOpen] = useState(false);
+  const [employeeModalMode, setEmployeeModalMode] = useState<'add' | 'edit'>('add');
+  const [editingEmployee, setEditingEmployee] = useState<PayrollEmployeeRow | null>(null);
+  const [employeeFormSaving, setEmployeeFormSaving] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastVariant, setToastVariant] = useState<'success' | 'error'>('success');
+  const [otPopup, setOtPopup] = useState<{ employeeId: number; day: number; hours: number } | null>(null);
+  const [bulkShareOpen, setBulkShareOpen] = useState(false);
+  const [payslipEmployee, setPayslipEmployee] = useState<PayrollEmployeeRow | null>(null);
   const exportUrlRef = useRef<string | null>(null);
   const exportNoticeRef = useRef<HTMLDivElement | null>(null);
+
+  const showToast = (message: string, variant: 'success' | 'error' = 'success') => {
+    setToastVariant(variant);
+    setToastMessage(message);
+  };
+
+  const openAddEmployeeModal = () => {
+    setEmployeeModalMode('add');
+    setEditingEmployee(null);
+    setEmployeeModalOpen(true);
+  };
+
+  const openEditEmployeeModal = (row: PayrollEmployeeRow) => {
+    if (!canEdit) return;
+    setEmployeeModalMode('edit');
+    setEditingEmployee(row);
+    setEmployeeModalOpen(true);
+  };
+
+  const closeEmployeeModal = () => {
+    if (employeeFormSaving) return;
+    setEmployeeModalOpen(false);
+    setEditingEmployee(null);
+  };
 
   const loadSheet = useCallback(async () => {
     setLoading(true);
@@ -88,7 +145,7 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
         }
       }
       setDetail(resolved);
-      setEmployees(resolved?.employees ?? []);
+      setEmployees((resolved?.employees ?? []).map(enrichEmployeeRow));
       if (resolved?.location?.trim()) {
         setProject(resolved.location.trim());
         setProjectInput(resolved.location.trim());
@@ -134,44 +191,111 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   }, [employees, search, designationFilter]);
 
   const patchRow = (employeeId: number, patch: Partial<PayrollEmployeeRow>) => {
-    setEmployees((rows) => rows.map((r) => (r.id === employeeId ? { ...r, ...patch } : r)));
+    setEmployees((rows) =>
+      rows.map((r) => (r.id === employeeId ? enrichEmployeeRow({ ...r, ...patch }) : r)),
+    );
     setDirty(true);
   };
 
-  const toggleDay = (employeeId: number, day: number) => {
-    if (!canEdit) return;
+  const setDayAttendance = (employeeId: number, day: number, dayAtt: DayAttendance) => {
     setEmployees((rows) =>
       rows.map((row) => {
         if (row.id !== employeeId) return row;
         const attendance = { ...(row.attendance ?? {}) };
         const key = String(day);
-        const next = nextAttendanceCode(attendance[key]);
-        if (next) attendance[key] = next;
+        const serialized = serializeDay(dayAtt);
+        if (serialized) attendance[key] = serialized;
         else delete attendance[key];
-        return { ...row, attendance };
+        return enrichEmployeeRow({ ...row, attendance });
       }),
     );
     setDirty(true);
   };
 
-  const handleAddEmployee = async () => {
-    if (!detail || !canEdit) return;
-    try {
-      const created = await addPayrollEmployee(accessToken, detail.id, {
-        serial_no: employees.length + 1,
-        name: 'New Employee',
-        designation: 'Helper',
-        attendance: {},
-        advance: 0,
-        wage: 0,
-        ot: '0',
-      });
-      setEmployees((rows) => [...rows, created]);
-      setDirty(false);
-      onStatus('Employee row added.');
-    } catch (error) {
-      onStatus(error instanceof Error ? error.message : 'Could not add employee.');
+  const handleDayClick = (employeeId: number, day: number) => {
+    if (!canEdit) return;
+    const row = employees.find((r) => r.id === employeeId);
+    if (!row) return;
+    const current = parseDayAttendance((row.attendance ?? {})[String(day)]);
+
+    if (current.attendanceStatus === 'P+OT') {
+      setOtPopup({ employeeId, day, hours: current.otHours });
+      return;
     }
+
+    const next = nextAttendanceStatus(current.attendanceStatus);
+    if (next === 'P+OT') {
+      setOtPopup({ employeeId, day, hours: 0 });
+      return;
+    }
+
+    if (!next) setDayAttendance(employeeId, day, emptyDay());
+    else setDayAttendance(employeeId, day, { attendanceStatus: next, otHours: 0 });
+  };
+
+  const confirmOtHours = (hours: number) => {
+    if (!otPopup) return;
+    setDayAttendance(otPopup.employeeId, otPopup.day, {
+      attendanceStatus: 'P+OT',
+      otHours: hours,
+    });
+    setOtPopup(null);
+  };
+
+  const clearOtDay = () => {
+    if (!otPopup) return;
+    setDayAttendance(otPopup.employeeId, otPopup.day, emptyDay());
+    setOtPopup(null);
+  };
+
+  const handleSaveEmployeeForm = async (values: EmployeeFormValues) => {
+    if (!detail || !canEdit) return;
+    setEmployeeFormSaving(true);
+    try {
+      if (employeeModalMode === 'add') {
+        const attendance = createEmptyAttendance(detail.days_in_month);
+        const body = formToEmployeeBody(values, {
+          serial_no: employees.length + 1,
+          attendance,
+          ot: '0',
+        });
+        const created = await addPayrollEmployee(accessToken, detail.id, body);
+        setEmployees((rows) => [...rows, created]);
+        setDetail({ ...detail, employees: [...employees, created] });
+        setDirty(false);
+        showToast('Employee added successfully');
+        setEmployeeModalOpen(false);
+        setEditingEmployee(null);
+        onStatus('Employee added successfully');
+      } else if (editingEmployee) {
+        const body = formToEmployeeBody(values, {
+          serial_no: editingEmployee.serial_no,
+          attendance: editingEmployee.attendance ?? {},
+          ot: editingEmployee.ot,
+        });
+        const saved = await updatePayrollEmployee(accessToken, editingEmployee.id, body);
+        setEmployees((rows) => rows.map((r) => (r.id === saved.id ? saved : r)));
+        setDetail({ ...detail, employees: employees.map((r) => (r.id === saved.id ? saved : r)) });
+        setDirty(false);
+        showToast('Employee updated successfully');
+        setEmployeeModalOpen(false);
+        setEditingEmployee(null);
+        onStatus('Employee updated successfully');
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Could not save employee.';
+      showToast(msg, 'error');
+      onStatus(msg);
+    } finally {
+      setEmployeeFormSaving(false);
+    }
+  };
+
+  const handleDeleteFromForm = () => {
+    if (!editingEmployee) return;
+    setEmployeeModalOpen(false);
+    setDeleteConfirmEmployeeId(editingEmployee.id);
+    setEditingEmployee(null);
   };
 
   const requestDeleteEmployee = (employeeId: number) => {
@@ -191,6 +315,7 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
         return next.map((r, idx) => ({ ...r, serial_no: idx + 1 }));
       });
       setDirty(true);
+      showToast('Employee removed');
       onStatus('Employee row removed.');
     } catch (error) {
       onStatus(error instanceof Error ? error.message : 'Could not remove employee.');
@@ -269,6 +394,31 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   };
 
   const monthLabel = MONTH_OPTIONS.find((m) => m.value === month)?.label ?? String(month);
+
+  const shareContext = useMemo(
+    () => ({
+      monthLabel,
+      year,
+      projectName: project,
+      companyName: detail?.company_name ?? 'MC.Engg',
+    }),
+    [monthLabel, year, project, detail?.company_name],
+  );
+
+  const handleShareNotify = (message: string, variant: 'success' | 'error' = 'success') => {
+    showToast(message, variant);
+    onStatus(message);
+  };
+
+  const handleCopyAllMessages = async () => {
+    if (!filteredRows.length) return;
+    try {
+      await navigator.clipboard.writeText(buildBulkShareText(filteredRows, shareContext));
+      handleShareNotify(`Copied ${filteredRows.length} attendance message(s)`);
+    } catch {
+      handleShareNotify('Could not copy messages', 'error');
+    }
+  };
 
   const yearSuggestions = useMemo(() => {
     const base = year;
@@ -368,11 +518,14 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
           onSheetApply={applySheetFilters}
           onSearchChange={setSearch}
           onDesignationFilterChange={setDesignationFilter}
-          onAddEmployee={() => void handleAddEmployee()}
+          onAddEmployee={openAddEmployeeModal}
           onSave={() => void handleSave()}
           exporting={exporting}
           onExport={() => void handleExport()}
           onPrint={handlePrint}
+          onShareAll={() => setBulkShareOpen(true)}
+          onCopyAllMessages={() => void handleCopyAllMessages()}
+          employeeCount={filteredRows.length}
         />
       </div>
 
@@ -389,16 +542,58 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
           year={year}
           rows={filteredRows}
           canEdit={canEdit}
-          onToggleDay={toggleDay}
+          onDayClick={handleDayClick}
           onPatchRow={patchRow}
+          onEditEmployee={openEditEmployeeModal}
           onDeleteEmployee={requestDeleteEmployee}
           deletingEmployeeId={deletingEmployeeId}
+          shareContext={shareContext}
+          onShareNotify={handleShareNotify}
+          onOpenPayslip={setPayslipEmployee}
         />
       </div>
 
       {dirty && canEdit && (
         <p className="print:hidden text-xs font-medium text-amber-700">Unsaved changes — click Save Attendance before leaving.</p>
       )}
+
+      <BulkShareModal
+        open={bulkShareOpen}
+        rows={filteredRows}
+        shareContext={shareContext}
+        onClose={() => setBulkShareOpen(false)}
+        onNotify={handleShareNotify}
+        onOpenPayslip={setPayslipEmployee}
+      />
+
+      <PayslipModal
+        open={payslipEmployee !== null}
+        row={payslipEmployee}
+        shareContext={shareContext}
+        onClose={() => setPayslipEmployee(null)}
+      />
+
+      <OtHoursPopup
+        open={otPopup !== null}
+        initialHours={otPopup?.hours ?? 0}
+        onConfirm={confirmOtHours}
+        onClearDay={clearOtDay}
+        onCancel={() => setOtPopup(null)}
+      />
+
+      <EmployeeFormModal
+        open={employeeModalOpen}
+        mode={employeeModalMode}
+        defaultProject={project}
+        projects={projects}
+        editingRow={editingEmployee}
+        saving={employeeFormSaving}
+        onClose={closeEmployeeModal}
+        onSave={(values) => void handleSaveEmployeeForm(values)}
+        onDelete={employeeModalMode === 'edit' ? handleDeleteFromForm : undefined}
+      />
+
+      <Toast message={toastMessage} variant={toastVariant} onDismiss={() => setToastMessage(null)} />
 
       {deleteConfirmEmployeeId !== null && (
         <div

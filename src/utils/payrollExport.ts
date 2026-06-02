@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import type { PayrollEmployeeRow, PayrollModuleDetail } from '../services/payrollApi.ts';
-import { buildMonthCalendar, calcFinalPayment } from './payroll.ts';
+import { formatDayLabel, parseDayAttendance } from './attendance.ts';
+import { buildMonthCalendar, calcFinalPayment, countTotalOtHours, rowOtAmount, rowOtRate } from './payroll.ts';
 
 export function payrollExportFilename(detail: Pick<PayrollModuleDetail, 'year' | 'month' | 'location'>) {
   const loc = (detail.location ?? 'project').replace(/[^\w.-]+/g, '_').slice(0, 40);
@@ -43,7 +44,18 @@ export async function buildPayrollExcelBlob(
   });
 
   const fixedHeaders = ['S.No', 'Name', 'Designation'];
-  const tailHeaders = ['OT', 'Total Days', 'Advance', 'Wage', 'Food', 'Final Payment', 'Remarks'];
+  const tailHeaders = [
+    'OT Hrs',
+    'OT Rate',
+    'OT Amt',
+    'Total Days',
+    'Advance',
+    'Wage',
+    'Salary/Month',
+    'Food',
+    'Final Payment',
+    'Remarks',
+  ];
   const lastCol = fixedHeaders.length + calendar.daysInMonth + tailHeaders.length;
 
   sheet.mergeCells(1, 1, 1, lastCol);
@@ -96,16 +108,20 @@ export async function buildPayrollExcelBlob(
     setCell(row.designation ?? '');
     for (const dayMeta of calendar.days) {
       const cell = sheet.getCell(rowNum, c);
-      cell.value = att[String(dayMeta.day)] ?? '';
+      const dayAtt = parseDayAttendance(att[String(dayMeta.day)]);
+      cell.value = formatDayLabel(dayAtt) === '·' ? '' : formatDayLabel(dayAtt);
       cell.border = thinBorder;
       cell.alignment = { horizontal: 'center', vertical: 'middle' };
       if (dayMeta.isSunday) cell.fill = sundayFill;
       c += 1;
     }
-    setCell(row.ot_amount ?? row.ot ?? 0, 'right');
-    setCell(row.total_days, 'center');
+    setCell(row.total_ot_hours ?? countTotalOtHours(row.attendance), 'right');
+    setCell(rowOtRate(row), 'right');
+    setCell(rowOtAmount(row), 'right');
+    setCell(row.total_days ?? 0, 'center');
     setCell(row.advance, 'right');
     setCell(row.wage, 'right');
+    setCell(row.monthly_salary ?? 0, 'right');
     setCell(row.food ?? '', 'right');
     setCell(calcFinalPayment(row), 'right');
     setCell(row.remarks ?? '');
@@ -116,7 +132,7 @@ export async function buildPayrollExcelBlob(
   sheet.getCell(rowNum, 3).value = 'Total';
   sheet.getCell(rowNum, 3).font = { bold: true };
   sheet.getCell(rowNum, 3).border = thinBorder;
-  const payCol = fixedHeaders.length + calendar.daysInMonth + 5;
+  const payCol = fixedHeaders.length + calendar.daysInMonth + 8;
   const totalCell = sheet.getCell(rowNum, payCol);
   totalCell.value = totalPayment;
   totalCell.font = { bold: true };
@@ -218,11 +234,26 @@ export function downloadPayrollCsv(detail: PayrollModuleDetail, employees: Payro
 
   lines.push(esc(detail.title));
   lines.push(
-    ['S.No', 'Name', 'Designation', ...Array.from({ length: dayCount }, (_, i) => String(i + 1)), 'OT', 'Total Days', 'Advance', 'Wage', 'Food', 'Final Payment', 'Remarks']
+    [
+      'S.No',
+      'Name',
+      'Designation',
+      ...Array.from({ length: dayCount }, (_, i) => String(i + 1)),
+      'OT Hrs',
+      'OT Rate',
+      'OT Amt',
+      'Total Days',
+      'Advance',
+      'Wage',
+      'Salary/Month',
+      'Food',
+      'Final Payment',
+      'Remarks',
+    ]
       .map(esc)
       .join(','),
   );
-  lines.push(['', '', '', ...calendar.weekdayLabels, '', '', '', '', '', '', ''].map(esc).join(','));
+  lines.push(['', '', '', ...calendar.weekdayLabels, '', '', '', '', '', '', '', '', '', ''].map(esc).join(','));
 
   for (const row of employees) {
     const att = row.attendance ?? {};
@@ -231,11 +262,17 @@ export function downloadPayrollCsv(detail: PayrollModuleDetail, employees: Payro
         row.serial_no,
         row.name,
         row.designation ?? '',
-        ...Array.from({ length: dayCount }, (_, i) => att[String(i + 1)] ?? ''),
-        row.ot_amount ?? row.ot ?? 0,
-        row.total_days,
+        ...Array.from({ length: dayCount }, (_, i) => {
+          const label = formatDayLabel(parseDayAttendance(att[String(i + 1)]));
+          return label === '·' ? '' : label;
+        }),
+        row.total_ot_hours ?? countTotalOtHours(row.attendance),
+        rowOtRate(row),
+        rowOtAmount(row),
+        row.total_days ?? 0,
         row.advance,
         row.wage,
+        row.monthly_salary ?? 0,
         row.food ?? '',
         calcFinalPayment(row),
         row.remarks ?? '',
@@ -247,7 +284,7 @@ export function downloadPayrollCsv(detail: PayrollModuleDetail, employees: Payro
 
   const total = employees.reduce((s, e) => s + calcFinalPayment(e), 0);
   lines.push('');
-  lines.push(['', '', 'Total', ...Array(dayCount).fill(''), '', '', '', '', '', total, ''].map(esc).join(','));
+  lines.push(['', '', 'Total', ...Array(dayCount).fill(''), '', '', '', '', '', '', '', total, ''].map(esc).join(','));
 
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const filename = payrollExportFilename(detail).replace('.xlsx', '.csv');

@@ -1,4 +1,5 @@
 import { API_ENDPOINTS } from '../config/endpoints.ts';
+import type { AttendanceMap } from '../utils/attendance.ts';
 import { apiRequest, downloadAuthenticatedBlob } from './apiClient.ts';
 
 export type PayrollEmployeeRow = {
@@ -7,13 +8,25 @@ export type PayrollEmployeeRow = {
   serial_no: number;
   name: string;
   designation: string | null;
-  attendance: Record<string, string> | null;
+  attendance: AttendanceMap | null;
   ot: string | null;
   ot_amount?: number;
+  total_ot_hours?: number;
+  ot_rate?: number;
   advance: number;
   wage: number;
+  monthly_salary?: number;
   food: number | null;
   remarks: string | null;
+  contact_number?: string | null;
+  email?: string | null;
+  address?: string | null;
+  project?: string | null;
+  joining_date?: string | null;
+  bank_name?: string | null;
+  account_number?: string | null;
+  ifsc_code?: string | null;
+  upi_id?: string | null;
   total_days: number;
   final_payment: number;
 };
@@ -47,12 +60,22 @@ export type PayrollEmployeeBody = {
   serial_no: number;
   name: string;
   designation?: string | null;
-  attendance?: Record<string, string> | null;
+  attendance?: AttendanceMap | null;
   ot?: string | null;
   advance?: number;
   wage?: number;
+  monthly_salary?: number;
   food?: number | null;
   remarks?: string | null;
+  contact_number?: string | null;
+  email?: string | null;
+  address?: string | null;
+  project?: string | null;
+  joining_date?: string | null;
+  bank_name?: string | null;
+  account_number?: string | null;
+  ifsc_code?: string | null;
+  upi_id?: string | null;
 };
 
 export function listPayrollLocations(token: string) {

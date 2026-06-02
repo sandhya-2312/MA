@@ -139,4 +139,22 @@
   body.salaries-print-active .salaries-table button.bg-violet-100 {
     background-color: #ede9fe !important;
   }
+
+  body.payslip-print-active > *:not(.payslip-print-clone) {
+    display: none !important;
+  }
+
+  body.payslip-print-active .payslip-print-clone {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 12mm !important;
+    background: #fff !important;
+    color: #0f172a !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }

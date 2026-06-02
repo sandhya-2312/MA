@@ -1,8 +1,33 @@
 import type { PayrollEmployeeRow } from '../services/payrollApi.ts';
+import {
+  type AttendanceMap,
+  type AttendanceStatus,
+  type DayAttendance,
+  attendanceCellClass,
+  calcFinalPayment,
+  calcOtAmount,
+  countTotalDays,
+  countTotalOtHours,
+  createEmptyAttendanceMap,
+  formatDayLabel,
+  nextAttendanceStatus,
+  parseDayAttendance,
+  parseOtRate,
+} from './attendance.ts';
 
-export type AttendanceCode = '' | 'P' | 'A' | 'H' | 'OT';
-
-const CYCLE: AttendanceCode[] = ['', 'P', 'A', 'H', 'OT'];
+export type { AttendanceStatus, DayAttendance, AttendanceMap };
+export {
+  attendanceCellClass,
+  calcFinalPayment,
+  calcOtAmount,
+  countTotalDays,
+  countTotalOtHours,
+  createEmptyAttendanceMap,
+  formatDayLabel,
+  nextAttendanceStatus,
+  parseDayAttendance,
+  parseOtRate,
+};
 
 export const MONTH_OPTIONS = [
   { value: 1, label: 'January' },
@@ -21,7 +46,6 @@ export const MONTH_OPTIONS = [
 
 export const DEFAULT_PROJECTS = ['Maruti -1 Drydock', 'Maruti -2 Drydock', 'Yard Office'];
 
-/** `month` is 1–12 (January = 1, December = 12) from the month selector. */
 export function toMonthIndex(month: number): number {
   return month - 1;
 }
@@ -65,65 +89,42 @@ export function weekdayLabels(year: number, month: number): string[] {
   return buildMonthCalendar(year, month).weekdayLabels;
 }
 
-export function normalizeAttendanceCode(raw: string | undefined | null): AttendanceCode {
-  const token = String(raw ?? '').trim().toUpperCase();
-  if (token === '1') return 'P';
-  if (token === 'P' || token === 'A' || token === 'H' || token === 'OT') return token;
-  return '';
-}
-
-export function nextAttendanceCode(current: string | undefined | null): AttendanceCode {
-  const token = normalizeAttendanceCode(current);
-  const idx = CYCLE.indexOf(token);
-  return CYCLE[(idx + 1) % CYCLE.length];
-}
-
-export function dayPoints(code: string | undefined | null): number {
-  const token = normalizeAttendanceCode(code);
-  if (token === 'P' || token === 'OT') return 1;
-  if (token === 'H') return 0.5;
-  return 0;
-}
-
-export function countTotalDays(attendance: Record<string, string> | null | undefined): number {
-  if (!attendance) return 0;
-  const sum = Object.values(attendance).reduce((acc, value) => acc + dayPoints(value), 0);
-  return Math.round(sum * 10) / 10;
+/** @deprecated Use nextAttendanceStatus */
+export function nextAttendanceCode(current: string | undefined | null): AttendanceStatus {
+  const day = parseDayAttendance(current);
+  return nextAttendanceStatus(day.attendanceStatus);
 }
 
 export function parseAmount(value: string | number | null | undefined): number {
-  if (value === null || value === undefined || value === '') return 0;
-  const n = Number(String(value).replace(/,/g, '').trim());
-  return Number.isFinite(n) ? Math.round(n) : 0;
+  return parseOtRate(value);
 }
 
-export function calcFinalPayment(row: Pick<PayrollEmployeeRow, 'attendance' | 'wage' | 'ot' | 'advance' | 'food'>): number {
-  const totalDays = countTotalDays(row.attendance);
-  const base = Math.round(totalDays * (row.wage || 0));
-  const ot = parseAmount(row.ot);
-  const advance = row.advance || 0;
-  const food = row.food || 0;
-  return Math.max(0, base + ot - advance - food);
+export function rowOtRate(row: Pick<PayrollEmployeeRow, 'ot_rate' | 'ot'>): number {
+  return row.ot_rate ?? parseOtRate(row.ot);
+}
+
+export function rowOtAmount(row: Pick<PayrollEmployeeRow, 'attendance' | 'ot_rate' | 'ot' | 'ot_amount'>): number {
+  if (row.ot_amount != null) return row.ot_amount;
+  const hours = countTotalOtHours(row.attendance as AttendanceMap);
+  return calcOtAmount(hours, rowOtRate(row));
 }
 
 export function enrichEmployeeRow(row: PayrollEmployeeRow): PayrollEmployeeRow {
-  const total_days = countTotalDays(row.attendance);
-  const final_payment = calcFinalPayment(row);
-  return { ...row, total_days, final_payment, ot_amount: parseAmount(row.ot) };
+  const attendance = row.attendance as AttendanceMap;
+  const total_days = countTotalDays(attendance);
+  const total_ot_hours = countTotalOtHours(attendance);
+  const ot_rate = rowOtRate(row);
+  const ot_amount = calcOtAmount(total_ot_hours, ot_rate);
+  const final_payment = calcFinalPayment({
+    attendance,
+    wage: row.wage,
+    ot_rate,
+    advance: row.advance,
+    food: row.food,
+  });
+  return { ...row, total_days, total_ot_hours, ot_rate, ot_amount, final_payment };
 }
 
 export function formatInr(amount: number): string {
   return amount.toLocaleString('en-IN');
-}
-
-export function attendanceCellClass(code: AttendanceCode, isSunday: boolean): string {
-  const base =
-    'flex h-7 w-7 cursor-pointer items-center justify-center border border-slate-300 text-[10px] font-bold uppercase transition select-none';
-  if (!code) {
-    return `${base} ${isSunday ? 'bg-amber-50 hover:bg-amber-100' : 'bg-white hover:bg-sky-50'}`;
-  }
-  if (code === 'P') return `${base} bg-emerald-100 text-emerald-900 hover:bg-emerald-200`;
-  if (code === 'A') return `${base} bg-rose-100 text-rose-800 hover:bg-rose-200`;
-  if (code === 'H') return `${base} bg-amber-100 text-amber-900 hover:bg-amber-200`;
-  return `${base} bg-violet-100 text-violet-900 hover:bg-violet-200`;
 }

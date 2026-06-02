@@ -21,6 +21,9 @@ type SalariesToolbarProps = {
   onSave: () => void;
   onExport: () => void;
   onPrint: () => void;
+  onShareAll: () => void;
+  onCopyAllMessages: () => void;
+  employeeCount: number;
 };
 
 const MONTHS = [
@@ -51,6 +54,9 @@ export function SalariesToolbar({
   onSave,
   onExport,
   onPrint,
+  onShareAll,
+  onCopyAllMessages,
+  employeeCount,
 }: SalariesToolbarProps) {
   const commitSheet = () => onSheetApply();
 
@@ -168,6 +174,24 @@ export function SalariesToolbar({
           )}
           <button
             type="button"
+            onClick={onShareAll}
+            disabled={employeeCount === 0}
+            className="rounded border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Share attendance via WhatsApp / SMS"
+          >
+            Share All
+          </button>
+          <button
+            type="button"
+            onClick={onCopyAllMessages}
+            disabled={employeeCount === 0}
+            className="rounded border border-slate-400 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Copy all attendance messages"
+          >
+            Copy Messages
+          </button>
+          <button
+            type="button"
             onClick={onExport}
             disabled={exporting}
             className="rounded border border-emerald-600 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-60"
@@ -184,11 +208,12 @@ export function SalariesToolbar({
         </div>
       </div>
       <p className="mt-3 text-xs text-slate-500">
-        Click day cells to cycle: <span className="font-semibold text-emerald-700">P</span> Present ·{' '}
-        <span className="font-semibold text-rose-700">A</span> Absent ·{' '}
-        <span className="font-semibold text-amber-700">H</span> Half ·{' '}
-        <span className="font-semibold text-violet-700">OT</span> Overtime day · Press{' '}
-        <span className="font-semibold">Enter</span> or click away from Project / Year to load that sheet
+        <span className="font-semibold text-sky-800">Add Employee</span> opens the registration form · Day cells:{' '}
+        <span className="font-semibold text-emerald-700">P</span> ·{' '}
+        <span className="font-semibold text-rose-700">A</span> ·{' '}
+        <span className="font-semibold text-orange-600">H</span> ·{' '}
+        <span className="font-semibold text-violet-700">P+OT</span> (enter hours) · Press{' '}
+        <span className="font-semibold">Enter</span> on Project / Year to load that sheet
       </p>
     </div>
   );
