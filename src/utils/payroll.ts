@@ -109,19 +109,30 @@ export function rowOtAmount(row: Pick<PayrollEmployeeRow, 'attendance' | 'ot_rat
   return calcOtAmount(hours, rowOtRate(row));
 }
 
-export function enrichEmployeeRow(row: PayrollEmployeeRow): PayrollEmployeeRow {
+export type PayrollPaymentInput = Pick<
+  PayrollEmployeeRow,
+  'attendance' | 'wage' | 'monthly_salary' | 'ot' | 'advance' | 'food'
+> & { ot_rate?: number };
+
+export function calcRowFinalPayment(row: PayrollPaymentInput, daysInMonth = 0): number {
+  return calcFinalPayment({
+    attendance: row.attendance as AttendanceMap,
+    wage: row.wage,
+    monthly_salary: row.monthly_salary ?? 0,
+    days_in_month: daysInMonth,
+    ot_rate: rowOtRate(row),
+    advance: row.advance,
+    food: row.food,
+  });
+}
+
+export function enrichEmployeeRow(row: PayrollEmployeeRow, daysInMonth = 0): PayrollEmployeeRow {
   const attendance = row.attendance as AttendanceMap;
   const total_days = countTotalDays(attendance);
   const total_ot_hours = countTotalOtHours(attendance);
   const ot_rate = rowOtRate(row);
   const ot_amount = calcOtAmount(total_ot_hours, ot_rate);
-  const final_payment = calcFinalPayment({
-    attendance,
-    wage: row.wage,
-    ot_rate,
-    advance: row.advance,
-    food: row.food,
-  });
+  const final_payment = calcRowFinalPayment(row, daysInMonth);
   return { ...row, total_days, total_ot_hours, ot_rate, ot_amount, final_payment };
 }
 

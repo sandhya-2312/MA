@@ -146,7 +146,7 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
         }
       }
       setDetail(resolved);
-      setEmployees((resolved?.employees ?? []).map(enrichEmployeeRow));
+      setEmployees((resolved?.employees ?? []).map((r) => enrichEmployeeRow(r, resolved?.days_in_month ?? 0)));
       if (resolved?.location?.trim()) {
         setProject(resolved.location.trim());
         setProjectInput(resolved.location.trim());
@@ -193,7 +193,9 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
 
   const patchRow = (employeeId: number, patch: Partial<PayrollEmployeeRow>) => {
     setEmployees((rows) =>
-      rows.map((r) => (r.id === employeeId ? enrichEmployeeRow({ ...r, ...patch }) : r)),
+      rows.map((r) =>
+        r.id === employeeId ? enrichEmployeeRow({ ...r, ...patch }, detail?.days_in_month ?? 0) : r,
+      ),
     );
     setDirty(true);
   };
@@ -207,7 +209,7 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
         const serialized = serializeDay(dayAtt);
         if (serialized) attendance[key] = serialized;
         else delete attendance[key];
-        return enrichEmployeeRow({ ...row, attendance });
+        return enrichEmployeeRow({ ...row, attendance }, detail?.days_in_month ?? 0);
       }),
     );
     setDirty(true);
@@ -402,8 +404,9 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
       year,
       projectName: project,
       companyName: detail?.company_name ?? 'MC.Engg',
+      daysInMonth: detail?.days_in_month ?? 0,
     }),
-    [monthLabel, year, project, detail?.company_name],
+    [monthLabel, year, project, detail?.company_name, detail?.days_in_month],
   );
 
   const handleShareNotify = (message: string, variant: 'success' | 'error' = 'success') => {

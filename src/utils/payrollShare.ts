@@ -1,12 +1,13 @@
 import type { PayrollEmployeeRow } from '../services/payrollApi.ts';
 import { countAttendanceBreakdown } from './attendance.ts';
-import { calcFinalPayment, countTotalOtHours, rowOtAmount, rowOtRate } from './payroll.ts';
+import { calcRowFinalPayment, countTotalOtHours, rowOtAmount, rowOtRate } from './payroll.ts';
 
 export type PayrollShareContext = {
   monthLabel: string;
   year: number;
   projectName: string;
   companyName?: string;
+  daysInMonth: number;
 };
 
 export type PhoneValidation = { ok: true; e164: string } | { ok: false; error: string };
@@ -45,7 +46,7 @@ export function buildPayrollShareMessage(row: PayrollEmployeeRow, ctx: PayrollSh
   const project = (row.project ?? ctx.projectName).trim() || ctx.projectName;
   const breakdown = countAttendanceBreakdown(row.attendance);
   const otHours = row.total_ot_hours ?? countTotalOtHours(row.attendance);
-  const finalPayment = row.final_payment ?? calcFinalPayment(row);
+  const finalPayment = calcRowFinalPayment(row, ctx.daysInMonth);
   const advance = row.advance ?? 0;
   const food = row.food ?? 0;
 
@@ -135,6 +136,6 @@ export function buildPayslipDetails(row: PayrollEmployeeRow, ctx: PayrollShareCo
     otHours: row.total_ot_hours ?? countTotalOtHours(row.attendance),
     otRate: rowOtRate(row),
     otAmount: rowOtAmount(row),
-    finalPayment: row.final_payment ?? calcFinalPayment(row),
+    finalPayment: calcRowFinalPayment(row, ctx.daysInMonth),
   };
 }

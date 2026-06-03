@@ -9,7 +9,7 @@ import {
 import type { PayrollShareContext } from '../../utils/payrollShare.ts';
 import {
   buildMonthCalendar,
-  calcFinalPayment,
+  calcRowFinalPayment,
   countTotalDays,
   countTotalOtHours,
   formatInr,
@@ -53,7 +53,8 @@ export function SalaryAttendanceTable({
 }: SalaryAttendanceTableProps) {
   const calendar = useMemo(() => buildMonthCalendar(year, month), [year, month]);
   const days = calendar.days;
-  const totalPayment = rows.reduce((sum, row) => sum + calcFinalPayment(row), 0);
+  const daysInMonth = detail.days_in_month;
+  const totalPayment = rows.reduce((sum, row) => sum + calcRowFinalPayment(row, daysInMonth), 0);
 
   return (
     <div className="salaries-sheet overflow-hidden rounded-lg border border-slate-400 bg-white shadow-md print:overflow-visible print:rounded-none print:shadow-none">
@@ -121,7 +122,7 @@ export function SalaryAttendanceTable({
                 const totalOtHrs = row.total_ot_hours ?? countTotalOtHours(row.attendance);
                 const otRate = rowOtRate(row);
                 const otAmount = rowOtAmount(row);
-                const payment = row.final_payment ?? calcFinalPayment(row);
+                const payment = calcRowFinalPayment(row, daysInMonth);
                 const stripe = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50/90';
                 return (
                   <tr key={row.id} className={`${stripe} hover:bg-sky-50/50`}>

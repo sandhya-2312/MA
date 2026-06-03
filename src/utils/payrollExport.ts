@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import type { PayrollEmployeeRow, PayrollModuleDetail } from '../services/payrollApi.ts';
 import { formatDayLabel, parseDayAttendance } from './attendance.ts';
-import { buildMonthCalendar, calcFinalPayment, countTotalOtHours, rowOtAmount, rowOtRate } from './payroll.ts';
+import { buildMonthCalendar, calcRowFinalPayment, countTotalOtHours, rowOtAmount, rowOtRate } from './payroll.ts';
 
 export function payrollExportFilename(detail: Pick<PayrollModuleDetail, 'year' | 'month' | 'location'>) {
   const loc = (detail.location ?? 'project').replace(/[^\w.-]+/g, '_').slice(0, 40);
@@ -123,12 +123,12 @@ export async function buildPayrollExcelBlob(
     setCell(row.wage, 'right');
     setCell(row.monthly_salary ?? 0, 'right');
     setCell(row.food ?? '', 'right');
-    setCell(calcFinalPayment(row), 'right');
+    setCell(calcRowFinalPayment(row, detail.days_in_month), 'right');
     setCell(row.remarks ?? '');
     rowNum += 1;
   }
 
-  const totalPayment = employees.reduce((sum, row) => sum + calcFinalPayment(row), 0);
+  const totalPayment = employees.reduce((sum, row) => sum + calcRowFinalPayment(row, detail.days_in_month), 0);
   sheet.getCell(rowNum, 3).value = 'Total';
   sheet.getCell(rowNum, 3).font = { bold: true };
   sheet.getCell(rowNum, 3).border = thinBorder;
@@ -274,7 +274,7 @@ export function downloadPayrollCsv(detail: PayrollModuleDetail, employees: Payro
         row.wage,
         row.monthly_salary ?? 0,
         row.food ?? '',
-        calcFinalPayment(row),
+        calcRowFinalPayment(row, detail.days_in_month),
         row.remarks ?? '',
       ]
         .map(esc)
@@ -282,7 +282,7 @@ export function downloadPayrollCsv(detail: PayrollModuleDetail, employees: Payro
     );
   }
 
-  const total = employees.reduce((s, e) => s + calcFinalPayment(e), 0);
+  const total = employees.reduce((s, e) => s + calcRowFinalPayment(e, detail.days_in_month), 0);
   lines.push('');
   lines.push(['', '', 'Total', ...Array(dayCount).fill(''), '', '', '', '', '', '', '', total, ''].map(esc).join(','));
 

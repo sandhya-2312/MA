@@ -138,9 +138,25 @@ export function calcOtAmount(totalOtHours: number, otRate: number): number {
   return Math.round(totalOtHours * otRate);
 }
 
+export function calcBasePay(input: {
+  totalDays: number;
+  wage: number;
+  monthly_salary?: number;
+  days_in_month?: number;
+}): number {
+  const monthly = input.monthly_salary ?? 0;
+  const daysInMonth = input.days_in_month ?? 0;
+  if (monthly > 0 && (input.wage || 0) <= 0 && daysInMonth > 0) {
+    return Math.round(input.totalDays * (monthly / daysInMonth));
+  }
+  return Math.round(input.totalDays * (input.wage || 0));
+}
+
 export function calcFinalPayment(input: {
   attendance: AttendanceMap | null | undefined;
   wage: number;
+  monthly_salary?: number;
+  days_in_month?: number;
   ot_rate?: number;
   ot?: string | null;
   advance: number;
@@ -149,7 +165,12 @@ export function calcFinalPayment(input: {
   const totalDays = countTotalDays(input.attendance);
   const totalOtHours = countTotalOtHours(input.attendance);
   const otRate = input.ot_rate ?? parseOtRate(input.ot);
-  const base = Math.round(totalDays * (input.wage || 0));
+  const base = calcBasePay({
+    totalDays,
+    wage: input.wage,
+    monthly_salary: input.monthly_salary,
+    days_in_month: input.days_in_month,
+  });
   const otAmount = calcOtAmount(totalOtHours, otRate);
   const advance = input.advance || 0;
   const food = input.food || 0;
