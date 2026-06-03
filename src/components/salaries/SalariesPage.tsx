@@ -9,6 +9,7 @@ import {
   updatePayrollEmployee,
 } from '../../services/payrollApi.ts';
 import {
+  attendanceForApi,
   emptyDay,
   nextAttendanceStatus,
   parseDayAttendance,
@@ -40,7 +41,7 @@ function employeeToBody(row: PayrollEmployeeRow): PayrollEmployeeBody {
     serial_no: row.serial_no,
     name: row.name,
     designation: row.designation,
-    attendance: row.attendance ?? {},
+    attendance: attendanceForApi(row.attendance),
     ot: row.ot,
     advance: row.advance,
     wage: row.wage,
