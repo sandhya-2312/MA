@@ -411,6 +411,7 @@ export default function App() {
               description: String(project.parameters?.description ?? ''),
               parameter: String(project.parameters?.parameter ?? ''),
               location: String(project.parameters?.location ?? ''),
+              companyName: String(project.parameters?.companyName ?? ''),
               dateOfCommitment: String(project.parameters?.dateOfCommitment ?? ''),
               plannedFinishDate: String(project.parameters?.plannedFinishDate ?? ''),
               materials: Array.isArray(project.parameters?.materials)
@@ -468,6 +469,7 @@ export default function App() {
             description: String(project.parameters?.description ?? ''),
             parameter: String(project.parameters?.parameter ?? ''),
             location: String(project.parameters?.location ?? ''),
+            companyName: String(project.parameters?.companyName ?? ''),
             dateOfCommitment: String(project.parameters?.dateOfCommitment ?? ''),
             plannedFinishDate: String(project.parameters?.plannedFinishDate ?? ''),
             materials: Array.isArray(project.parameters?.materials)
@@ -773,6 +775,7 @@ export default function App() {
         parameter: payload.parameter ?? '',
         projectKind: payload.projectKind,
         projectStatus: payload.projectStatus,
+        companyName: payload.companyName ?? '',
         location: payload.location ?? '',
         dateOfCommitment: payload.dateOfCommitment ?? '',
         plannedFinishDate: payload.plannedFinishDate ?? '',
@@ -818,6 +821,7 @@ export default function App() {
           parameter: payload.parameter ?? '',
           projectKind: payload.projectKind,
           projectStatus: payload.projectStatus,
+          companyName: payload.companyName ?? '',
           location: payload.location ?? '',
           dateOfCommitment: payload.dateOfCommitment ?? '',
           plannedFinishDate: payload.plannedFinishDate ?? '',

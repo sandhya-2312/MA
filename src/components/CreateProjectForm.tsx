@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import type { Project, ProjectEntry } from '../types';
+import { DEFAULT_COMPANIES } from '../utils/payroll.ts';
 
 const projectKindOptions = ['Refit', 'New Project'] as const;
 export const projectStatusOptions = ['Active', 'Planning', 'On hold', 'Completed'] as const;
@@ -46,6 +47,7 @@ export type CreateProjectPayload = {
   description: string;
   /** Technical / summary parameter (stored in API `parameters.parameter`). */
   parameter?: string;
+  companyName?: string;
   location?: string;
   dateOfCommitment?: string;
   plannedFinishDate?: string;
@@ -637,6 +639,7 @@ export function buildInitialValuesFromProject(project: Project): CreateProjectPa
     projectStatus,
     description: project.description,
     parameter: project.parameter ?? '',
+    companyName: project.companyName ?? '',
     location: project.location ?? '',
     dateOfCommitment: project.dateOfCommitment ?? '',
     plannedFinishDate: project.plannedFinishDate ?? '',
@@ -787,6 +790,7 @@ export function CreateProjectForm({
   );
   const [description, setDescription] = useState(initialValues?.description ?? '');
   const [parameter, setParameter] = useState(initialValues?.parameter ?? '');
+  const [companyName, setCompanyName] = useState(initialValues?.companyName ?? '');
   const [location, setLocation] = useState(initialValues?.location ?? '');
   const [dateOfCommitment, setDateOfCommitment] = useState(initialValues?.dateOfCommitment ?? '');
   const [plannedFinishDate, setPlannedFinishDate] = useState(initialValues?.plannedFinishDate ?? '');
@@ -881,6 +885,7 @@ export function CreateProjectForm({
         projectStatus,
         description: description.trim(),
         parameter: parameter.trim(),
+        companyName: companyName.trim(),
         location: location.trim(),
         dateOfCommitment,
         plannedFinishDate,
@@ -900,6 +905,7 @@ export function CreateProjectForm({
         setName('');
         setDescription('');
         setParameter('');
+        setCompanyName('');
         setLocation('');
         setDateOfCommitment('');
         setPlannedFinishDate('');
@@ -932,6 +938,20 @@ export function CreateProjectForm({
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Maruti 1 - Dry Dock Steel Refit"
             required
+            className={`${fieldClass} w-full`}
+          />
+        </div>
+        <div className="md:col-span-2">
+          <label className={labelClass} htmlFor={`${fieldId}-company`}>
+            Company name
+          </label>
+          <ComboboxInput
+            id={`${fieldId}-company`}
+            listId={`${fieldId}-company-suggestions`}
+            value={companyName}
+            onValueChange={setCompanyName}
+            options={DEFAULT_COMPANIES}
+            placeholder="e.g. MC.Engg"
             className={`${fieldClass} w-full`}
           />
         </div>

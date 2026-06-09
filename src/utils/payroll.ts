@@ -46,6 +46,20 @@ export const MONTH_OPTIONS = [
 
 export const DEFAULT_PROJECTS = ['Maruti -1 Drydock', 'Maruti -2 Drydock', 'Yard Office'];
 
+export const DEFAULT_COMPANIES = ['MC.Engg'];
+
+export function buildPayrollModuleTitle(
+  month: number,
+  year: number,
+  location: string | null | undefined,
+  companyName?: string | null,
+): string {
+  const monthLabel = MONTH_OPTIONS.find((m) => m.value === month)?.label ?? String(month);
+  const loc = (location ?? '').trim() || DEFAULT_PROJECTS[0];
+  const company = (companyName ?? 'MC.Engg').trim() || 'MC.Engg';
+  return `${company} Payroll : ${monthLabel} ${year} ( ${loc} )`;
+}
+
 export function toMonthIndex(month: number): number {
   return month - 1;
 }
@@ -53,6 +67,19 @@ export function toMonthIndex(month: number): number {
 export function daysInMonth(year: number, month: number): number {
   const monthIndex = toMonthIndex(month);
   return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+/** Derive daily wage and OT/hour from fixed monthly salary (8-hour day, pro-rated by calendar days). */
+export function derivePayRatesFromMonthlySalary(
+  monthlySalary: number,
+  daysInMonthCount: number,
+): { wage: number; otRate: number } {
+  if (monthlySalary <= 0 || daysInMonthCount <= 0) {
+    return { wage: 0, otRate: 0 };
+  }
+  const wage = Math.round(monthlySalary / daysInMonthCount);
+  const otRate = Math.round(wage / 8);
+  return { wage, otRate };
 }
 
 export type MonthDayMeta = {
@@ -127,13 +154,22 @@ export function calcRowFinalPayment(row: PayrollPaymentInput, daysInMonth = 0): 
 }
 
 export function enrichEmployeeRow(row: PayrollEmployeeRow, daysInMonth = 0): PayrollEmployeeRow {
-  const attendance = row.attendance as AttendanceMap;
+  const monthly = row.monthly_salary ?? 0;
+  let wage = row.wage;
+  let ot = row.ot;
+  if (monthly > 0 && daysInMonth > 0) {
+    const derived = derivePayRatesFromMonthlySalary(monthly, daysInMonth);
+    wage = derived.wage;
+    ot = String(derived.otRate);
+  }
+  const enriched = { ...row, wage, ot };
+  const attendance = enriched.attendance as AttendanceMap;
   const total_days = countTotalDays(attendance);
   const total_ot_hours = countTotalOtHours(attendance);
-  const ot_rate = rowOtRate(row);
+  const ot_rate = rowOtRate(enriched);
   const ot_amount = calcOtAmount(total_ot_hours, ot_rate);
-  const final_payment = calcRowFinalPayment(row, daysInMonth);
-  return { ...row, total_days, total_ot_hours, ot_rate, ot_amount, final_payment };
+  const final_payment = calcRowFinalPayment(enriched, daysInMonth);
+  return { ...enriched, total_days, total_ot_hours, ot_rate, ot_amount, final_payment };
 }
 
 export function formatInr(amount: number): string {

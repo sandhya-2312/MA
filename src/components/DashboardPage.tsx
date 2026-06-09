@@ -752,7 +752,7 @@ export function DashboardPage({
             : activeTab === 'members'
               ? 'Members'
               : activeTab === 'payroll'
-                ? 'Salaries'
+                ? ''
                 : 'Profile';
 
   const headerDisplayName =
@@ -1297,7 +1297,7 @@ export function DashboardPage({
                   <button type="button" onClick={() => setActiveTab('payroll')} className={navButtonClass('payroll')}>
                     <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
                       <IconNavPayroll />
-                      {!sidebarCollapsed && 'Salaries'}
+                      {!sidebarCollapsed && 'Payroll'}
                     </span>
                   </button>
                 )}
@@ -1385,7 +1385,7 @@ export function DashboardPage({
                   >
                     <span className="inline-flex items-center gap-2">
                       <IconNavPayroll />
-                      Salaries
+                      Payroll
                     </span>
                   </button>
                 )}
@@ -1425,8 +1425,11 @@ export function DashboardPage({
         )}
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-white no-scrollbar overflow-x-hidden p-5 [-webkit-overflow-scrolling:touch] sm:p-6 md:p-8">
+          {(pageTitle || activeTab === 'dashboard') && (
           <div className="mb-6 shrink-0 md:mb-8">
-            <h1 className="truncate text-base font-semibold tracking-tight text-slate-900 sm:text-lg">{pageTitle}</h1>
+            {pageTitle ? (
+              <h1 className="truncate text-base font-semibold tracking-tight text-slate-900 sm:text-lg">{pageTitle}</h1>
+            ) : null}
 
             {activeTab === 'dashboard' && (
               <div className="mt-4 space-y-3">
@@ -1490,6 +1493,7 @@ export function DashboardPage({
               </div>
             )}
           </div>
+          )}
 
           {activeTab === 'projectSummary' && summaryProject && (
             <ProjectSummaryPage

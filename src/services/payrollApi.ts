@@ -6,6 +6,7 @@ export type PayrollEmployeeRow = {
   id: number;
   module_id: number;
   serial_no: number;
+  emp_id?: string | null;
   name: string;
   designation: string | null;
   attendance: AttendanceMap | null;
@@ -27,6 +28,8 @@ export type PayrollEmployeeRow = {
   account_number?: string | null;
   ifsc_code?: string | null;
   upi_id?: string | null;
+  aadhar_number?: string | null;
+  pan_number?: string | null;
   total_days: number;
   final_payment: number;
 };
@@ -56,8 +59,32 @@ export type PayrollModuleCreateBody = {
   copy_from_module_id?: number | null;
 };
 
+export type PayrollProjectAttendanceSummary = {
+  module_id: number;
+  project: string;
+  company_name: string | null;
+  employee_count: number;
+  present_days: number;
+  ot_hours: number;
+  absent_days: number;
+  half_days: number;
+};
+
+export type PayrollAttendanceSummary = {
+  month: number;
+  year: number;
+  company_name: string | null;
+  projects: PayrollProjectAttendanceSummary[];
+  total_present_days: number;
+  total_ot_hours: number;
+  total_absent_days: number;
+  total_half_days: number;
+  total_employees: number;
+};
+
 export type PayrollEmployeeBody = {
   serial_no: number;
+  emp_id?: string | null;
   name: string;
   designation?: string | null;
   attendance?: AttendanceMap | null;
@@ -76,10 +103,16 @@ export type PayrollEmployeeBody = {
   account_number?: string | null;
   ifsc_code?: string | null;
   upi_id?: string | null;
+  aadhar_number?: string | null;
+  pan_number?: string | null;
 };
 
 export function listPayrollLocations(token: string) {
   return apiRequest<{ locations: string[] }>(API_ENDPOINTS.payrollLocations, { token });
+}
+
+export function listPayrollCompanies(token: string) {
+  return apiRequest<{ companies: string[] }>(API_ENDPOINTS.payrollCompanies, { token });
 }
 
 export function listPayrollModules(
@@ -95,15 +128,31 @@ export function listPayrollModules(
   return apiRequest<PayrollModuleSummary[]>(path, { token });
 }
 
+export function fetchPayrollAttendanceSummary(
+  token: string,
+  params: { month: number; year: number; company_name?: string },
+) {
+  const search = new URLSearchParams({
+    month: String(params.month),
+    year: String(params.year),
+  });
+  if (params.company_name?.trim()) search.set('company_name', params.company_name.trim());
+  return apiRequest<PayrollAttendanceSummary>(
+    `${API_ENDPOINTS.payrollAttendanceSummary}?${search.toString()}`,
+    { token },
+  );
+}
+
 export function resolvePayrollModule(
   token: string,
-  params: { month: number; year: number; location?: string },
+  params: { month: number; year: number; location?: string; company_name?: string },
 ) {
   const search = new URLSearchParams({
     month: String(params.month),
     year: String(params.year),
   });
   if (params.location) search.set('location', params.location);
+  if (params.company_name) search.set('company_name', params.company_name);
   return apiRequest<PayrollModuleDetail | null>(
     `${API_ENDPOINTS.payrollModuleResolve}?${search.toString()}`,
     { token },

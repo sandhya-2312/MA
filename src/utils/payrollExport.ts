@@ -1,7 +1,14 @@
 import ExcelJS from 'exceljs';
 import type { PayrollEmployeeRow, PayrollModuleDetail } from '../services/payrollApi.ts';
 import { formatDayLabel, parseDayAttendance } from './attendance.ts';
-import { buildMonthCalendar, calcRowFinalPayment, countTotalOtHours, rowOtAmount, rowOtRate } from './payroll.ts';
+import {
+  buildMonthCalendar,
+  buildPayrollModuleTitle,
+  calcRowFinalPayment,
+  countTotalOtHours,
+  rowOtAmount,
+  rowOtRate,
+} from './payroll.ts';
 
 export function payrollExportFilename(detail: Pick<PayrollModuleDetail, 'year' | 'month' | 'location'>) {
   const loc = (detail.location ?? 'project').replace(/[^\w.-]+/g, '_').slice(0, 40);
@@ -39,11 +46,11 @@ export async function buildPayrollExcelBlob(
   const calendar = buildMonthCalendar(detail.year, detail.month);
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Metal Works';
-  const sheet = workbook.addWorksheet('Salaries', {
-    views: [{ state: 'frozen', xSplit: 3, ySplit: 3 }],
+  const sheet = workbook.addWorksheet('Payroll', {
+    views: [{ state: 'frozen', xSplit: 4, ySplit: 3 }],
   });
 
-  const fixedHeaders = ['S.No', 'Name', 'Designation'];
+  const fixedHeaders = ['S.No', 'EMP ID', 'Name', 'Designation'];
   const tailHeaders = [
     'OT Hrs',
     'OT Rate',
@@ -60,7 +67,7 @@ export async function buildPayrollExcelBlob(
 
   sheet.mergeCells(1, 1, 1, lastCol);
   const titleCell = sheet.getCell(1, 1);
-  titleCell.value = detail.title;
+  titleCell.value = buildPayrollModuleTitle(detail.month, detail.year, detail.location, detail.company_name);
   titleCell.font = { bold: true, size: 12 };
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
@@ -104,6 +111,7 @@ export async function buildPayrollExcelBlob(
       c += 1;
     };
     setCell(row.serial_no, 'center');
+    setCell(row.emp_id ?? '', 'center');
     setCell(row.name);
     setCell(row.designation ?? '');
     for (const dayMeta of calendar.days) {
@@ -232,10 +240,11 @@ export function downloadPayrollCsv(detail: PayrollModuleDetail, employees: Payro
   const lines: string[] = [];
   const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
 
-  lines.push(esc(detail.title));
+  lines.push(esc(buildPayrollModuleTitle(detail.month, detail.year, detail.location, detail.company_name)));
   lines.push(
     [
       'S.No',
+      'EMP ID',
       'Name',
       'Designation',
       ...Array.from({ length: dayCount }, (_, i) => String(i + 1)),
@@ -253,13 +262,14 @@ export function downloadPayrollCsv(detail: PayrollModuleDetail, employees: Payro
       .map(esc)
       .join(','),
   );
-  lines.push(['', '', '', ...calendar.weekdayLabels, '', '', '', '', '', '', '', '', '', ''].map(esc).join(','));
+  lines.push(['', '', '', '', ...calendar.weekdayLabels, '', '', '', '', '', '', '', '', '', ''].map(esc).join(','));
 
   for (const row of employees) {
     const att = row.attendance ?? {};
     lines.push(
       [
         row.serial_no,
+        row.emp_id ?? '',
         row.name,
         row.designation ?? '',
         ...Array.from({ length: dayCount }, (_, i) => {

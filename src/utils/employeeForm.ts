@@ -1,8 +1,10 @@
 import type { PayrollEmployeeBody, PayrollEmployeeRow } from '../services/payrollApi.ts';
 import { attendanceForApi, createEmptyAttendanceMap } from './attendance.ts';
+import { derivePayRatesFromMonthlySalary } from './payroll.ts';
 
 export type EmployeeFormValues = {
   fullName: string;
+  empId: string;
   contactNumber: string;
   email: string;
   address: string;
@@ -19,15 +21,45 @@ export type EmployeeFormValues = {
   advanceAmount: string;
   otRate: string;
   remarks: string;
+  aadharNumber: string;
+  panNumber: string;
 };
 
 export type EmployeeFormErrors = Partial<Record<keyof EmployeeFormValues, string>>;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MOBILE_RE = /^[6-9]\d{9}$/;
+const AADHAR_RE = /^\d{12}$/;
+const PAN_RE = /^[A-Z]{5}\d{4}[A-Z]$/;
+const EMP_ID_RE = /^\d{5}$/;
+
+export function formatEmpId(prefix: number, year: number): string {
+  return `${String(prefix).padStart(3, '0')}${String(year % 100).padStart(2, '0')}`;
+}
+
+export function empIdYearFromJoiningDate(joiningDate: string, fallbackYear: number): number {
+  if (joiningDate && joiningDate.length >= 4) {
+    const year = Number(joiningDate.slice(0, 4));
+    if (Number.isFinite(year) && year >= 2000 && year <= 2100) return year;
+  }
+  return fallbackYear;
+}
+
+export function suggestNextEmpId(existingEmpIds: (string | null | undefined)[], year: number): string {
+  const yearSuffix = String(year % 100).padStart(2, '0');
+  let maxPrefix = 0;
+  for (const id of existingEmpIds) {
+    if (id?.length === 5 && id.endsWith(yearSuffix)) {
+      const prefix = Number(id.slice(0, 3));
+      if (Number.isFinite(prefix)) maxPrefix = Math.max(maxPrefix, prefix);
+    }
+  }
+  return formatEmpId(maxPrefix + 1, year);
+}
 
 export const EMPTY_EMPLOYEE_FORM: EmployeeFormValues = {
   fullName: '',
+  empId: '',
   contactNumber: '',
   email: '',
   address: '',
@@ -44,11 +76,14 @@ export const EMPTY_EMPLOYEE_FORM: EmployeeFormValues = {
   advanceAmount: '0',
   otRate: '0',
   remarks: '',
+  aadharNumber: '',
+  panNumber: '',
 };
 
 export function employeeRowToForm(row: PayrollEmployeeRow, defaultProject: string): EmployeeFormValues {
   return {
     fullName: row.name,
+    empId: row.emp_id ?? '',
     contactNumber: row.contact_number ?? '',
     email: row.email ?? '',
     address: row.address ?? '',
@@ -65,6 +100,8 @@ export function employeeRowToForm(row: PayrollEmployeeRow, defaultProject: strin
     advanceAmount: String(row.advance ?? 0),
     otRate: String(row.ot_rate ?? row.ot ?? 0),
     remarks: row.remarks ?? '',
+    aadharNumber: row.aadhar_number ?? '',
+    panNumber: row.pan_number ?? '',
   };
 }
 
@@ -118,6 +155,21 @@ export function validateEmployeeForm(values: EmployeeFormValues, mode: 'add' | '
     errors.otRate = 'OT rate must be a valid number.';
   }
 
+  const aadhar = values.aadharNumber.replace(/\s/g, '');
+  if (aadhar && !AADHAR_RE.test(aadhar)) {
+    errors.aadharNumber = 'Enter a valid 12-digit Aadhar number.';
+  }
+
+  const pan = values.panNumber.trim().toUpperCase();
+  if (pan && !PAN_RE.test(pan)) {
+    errors.panNumber = 'Enter a valid PAN (e.g. ABCDE1234F).';
+  }
+
+  const empId = values.empId.replace(/\s/g, '');
+  if (empId && !EMP_ID_RE.test(empId)) {
+    errors.empId = 'EMP ID must be 5 digits (3-digit prefix + 2-digit year, e.g. 00126).';
+  }
+
   if (mode === 'add') {
     if (!values.bankName.trim()) errors.bankName = 'Bank name is required.';
     if (!values.accountNumber.trim()) errors.accountNumber = 'Account number is required.';
@@ -130,15 +182,22 @@ export function validateEmployeeForm(values: EmployeeFormValues, mode: 'add' | '
 export function formToEmployeeBody(
   values: EmployeeFormValues,
   row: Pick<PayrollEmployeeRow, 'serial_no' | 'attendance' | 'ot'> | { serial_no: number; attendance: PayrollEmployeeRow['attendance']; ot: string | null },
+  daysInMonth = 0,
 ): PayrollEmployeeBody {
-  const wage = Math.round(Number(values.wage) || 0);
   const monthly_salary = Math.round(Number(values.monthlySalary) || 0);
+  let wage = Math.round(Number(values.wage) || 0);
+  let otRate = Math.round(Number(values.otRate) || 0);
+  if (monthly_salary > 0 && daysInMonth > 0) {
+    const derived = derivePayRatesFromMonthlySalary(monthly_salary, daysInMonth);
+    wage = derived.wage;
+    otRate = derived.otRate;
+  }
   const food = Math.round(Number(values.foodDeduction) || 0);
   const advance = Math.round(Number(values.advanceAmount) || 0);
-  const otRate = Math.round(Number(values.otRate) || 0);
 
   return {
     serial_no: row.serial_no,
+    emp_id: values.empId.replace(/\s/g, '') || null,
     name: values.fullName.trim(),
     designation: values.designation.trim() || null,
     attendance: attendanceForApi(row.attendance ?? {}),
@@ -157,6 +216,8 @@ export function formToEmployeeBody(
     account_number: values.accountNumber.trim() || null,
     ifsc_code: values.ifscCode.trim().toUpperCase() || null,
     upi_id: values.upiId.trim() || null,
+    aadhar_number: values.aadharNumber.replace(/\s/g, '') || null,
+    pan_number: values.panNumber.trim().toUpperCase() || null,
   };
 }
 

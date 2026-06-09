@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PayrollEmployeeBody, PayrollEmployeeRow, PayrollModuleDetail } from '../../services/payrollApi.ts';
+import type { PayrollEmployeeBody, PayrollEmployeeRow, PayrollModuleDetail, PayrollAttendanceSummary, PayrollProjectAttendanceSummary } from '../../services/payrollApi.ts';
 import {
   addPayrollEmployee,
   createPayrollModule,
+  fetchPayrollAttendanceSummary,
+  listPayrollCompanies,
   listPayrollLocations,
   resolvePayrollModule,
   deletePayrollEmployee,
@@ -16,7 +18,13 @@ import {
   serializeDay,
   type DayAttendance,
 } from '../../utils/attendance.ts';
-import { DEFAULT_PROJECTS, MONTH_OPTIONS, enrichEmployeeRow } from '../../utils/payroll.ts';
+import {
+  DEFAULT_COMPANIES,
+  DEFAULT_PROJECTS,
+  MONTH_OPTIONS,
+  buildPayrollModuleTitle,
+  enrichEmployeeRow,
+} from '../../utils/payroll.ts';
 import {
   downloadPayrollCsv,
   preparePayrollExport,
@@ -29,16 +37,20 @@ import type { Role } from '../../types';
 import { Toast } from '../ui/Toast.tsx';
 import { createEmptyAttendance, formToEmployeeBody, type EmployeeFormValues } from '../../utils/employeeForm.ts';
 import { EmployeeFormModal } from './EmployeeFormModal.tsx';
-import { SalariesToolbar } from './SalariesToolbar.tsx';
+import { SalariesToolbar, type PayrollSheetSelectionInput } from './SalariesToolbar.tsx';
+import { ApiError } from '../../services/apiClient.ts';
 import { buildBulkShareText } from '../../utils/payrollShare.ts';
 import { BulkShareModal } from './BulkShareModal.tsx';
 import { PayslipModal } from './PayslipModal.tsx';
 import { OtHoursPopup } from './OtHoursPopup.tsx';
 import { SalaryAttendanceTable } from './SalaryAttendanceTable.tsx';
+import { PayrollSummaryDashboard } from './PayrollSummaryDashboard.tsx';
+import { IconArrowLeft } from '../actionIcons.tsx';
 
 function employeeToBody(row: PayrollEmployeeRow): PayrollEmployeeBody {
   return {
     serial_no: row.serial_no,
+    emp_id: row.emp_id ?? null,
     name: row.name,
     designation: row.designation,
     attendance: attendanceForApi(row.attendance),
@@ -57,6 +69,8 @@ function employeeToBody(row: PayrollEmployeeRow): PayrollEmployeeBody {
     account_number: row.account_number ?? null,
     ifsc_code: row.ifsc_code ?? null,
     upi_id: row.upi_id ?? null,
+    aadhar_number: row.aadhar_number ?? null,
+    pan_number: row.pan_number ?? null,
   };
 }
 
@@ -73,12 +87,19 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [yearInput, setYearInput] = useState(String(now.getFullYear()));
-  const [project, setProject] = useState(DEFAULT_PROJECTS[0]);
-  const [projectInput, setProjectInput] = useState(DEFAULT_PROJECTS[0]);
+  const [company, setCompany] = useState('');
+  const [companyInput, setCompanyInput] = useState('');
+  const [companies, setCompanies] = useState<string[]>(DEFAULT_COMPANIES);
+  const [project, setProject] = useState('');
+  const [projectInput, setProjectInput] = useState('');
   const [projects, setProjects] = useState<string[]>(DEFAULT_PROJECTS);
   const [detail, setDetail] = useState<PayrollModuleDetail | null>(null);
   const [employees, setEmployees] = useState<PayrollEmployeeRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [sheetNotFound, setSheetNotFound] = useState(false);
+  const [bootstrapping, setBootstrapping] = useState(true);
+  const [loadingSheet, setLoadingSheet] = useState(false);
+  const [creatingSheet, setCreatingSheet] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingEmployeeId, setDeletingEmployeeId] = useState<number | null>(null);
   const [deleteConfirmEmployeeId, setDeleteConfirmEmployeeId] = useState<number | null>(null);
@@ -97,6 +118,8 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   const [otPopup, setOtPopup] = useState<{ employeeId: number; day: number; hours: number } | null>(null);
   const [bulkShareOpen, setBulkShareOpen] = useState(false);
   const [payslipEmployee, setPayslipEmployee] = useState<PayrollEmployeeRow | null>(null);
+  const [attendanceSummary, setAttendanceSummary] = useState<PayrollAttendanceSummary | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
   const exportUrlRef = useRef<string | null>(null);
   const exportNoticeRef = useRef<HTMLDivElement | null>(null);
 
@@ -124,50 +147,164 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
     setEditingEmployee(null);
   };
 
-  const loadSheet = useCallback(async () => {
-    setLoading(true);
-    try {
-      const locRes = await listPayrollLocations(accessToken);
-      setProjects(locRes.locations.length ? locRes.locations : DEFAULT_PROJECTS);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setBootstrapping(true);
+      try {
+        const locRes = await listPayrollLocations(accessToken);
+        if (cancelled) return;
+        setProjects(locRes.locations.length ? locRes.locations : DEFAULT_PROJECTS);
 
-      let resolved = await resolvePayrollModule(accessToken, { month, year, location: project });
-      if (!resolved && canEdit) {
         try {
-          resolved = await createPayrollModule(accessToken, {
-            month,
-            year,
-            location: project,
-            company_name: 'MC.Engg',
-          });
-          onStatus(`Created salary sheet for ${MONTH_OPTIONS.find((m) => m.value === month)?.label} ${year}.`);
-        } catch (createErr) {
-          resolved = await resolvePayrollModule(accessToken, { month, year, location: project });
-          if (!resolved) throw createErr;
+          const companyRes = await listPayrollCompanies(accessToken);
+          if (!cancelled) {
+            setCompanies(companyRes.companies.length ? companyRes.companies : DEFAULT_COMPANIES);
+          }
+        } catch {
+          if (!cancelled) setCompanies(DEFAULT_COMPANIES);
         }
+      } catch (error) {
+        if (!cancelled) {
+          onStatus(error instanceof Error ? error.message : 'Failed to load payroll options.');
+        }
+      } finally {
+        if (!cancelled) setBootstrapping(false);
       }
-      setDetail(resolved);
-      setEmployees((resolved?.employees ?? []).map((r) => enrichEmployeeRow(r, resolved?.days_in_month ?? 0)));
-      if (resolved?.location?.trim()) {
-        setProject(resolved.location.trim());
-        setProjectInput(resolved.location.trim());
-      }
-      if (resolved) {
-        setYear(resolved.year);
-        setYearInput(String(resolved.year));
-      }
-      setDirty(false);
-    } catch (error) {
-      setDetail(null);
-      setEmployees([]);
-      onStatus(error instanceof Error ? error.message : 'Failed to load salary sheet.');
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken, month, year, project, canEdit, onStatus]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, onStatus]);
 
   useEffect(() => {
-    void loadSheet();
-  }, [loadSheet]);
+    if (sheetVisible) return;
+    let cancelled = false;
+    const parsedYear = Number.parseInt(yearInput.trim(), 10);
+    const summaryYear =
+      Number.isFinite(parsedYear) && parsedYear >= 2000 && parsedYear <= 2100 ? parsedYear : year;
+
+    (async () => {
+      setLoadingSummary(true);
+      try {
+        const summary = await fetchPayrollAttendanceSummary(accessToken, {
+          month,
+          year: summaryYear,
+        });
+        if (!cancelled) setAttendanceSummary(summary);
+      } catch {
+        if (!cancelled) setAttendanceSummary(null);
+      } finally {
+        if (!cancelled) setLoadingSummary(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, month, year, yearInput, sheetVisible]);
+
+  const applyResolvedSheet = useCallback(
+    (resolved: PayrollModuleDetail, companyName: string, projectName: string) => {
+      setDetail(resolved);
+      setEmployees((resolved.employees ?? []).map((r) => enrichEmployeeRow(r, resolved.days_in_month ?? 0)));
+      setCompany(companyName);
+      setCompanyInput(companyName);
+      setProject(projectName);
+      setProjectInput(projectName);
+      setYear(resolved.year);
+      setYearInput(String(resolved.year));
+      setCompanies((prev) => (prev.includes(companyName) ? prev : [companyName, ...prev]));
+      setProjects((prev) => (prev.includes(projectName) ? prev : [projectName, ...prev]));
+      setSheetVisible(true);
+      setSheetNotFound(false);
+      setDirty(false);
+    },
+    [],
+  );
+
+  const loadSheet = useCallback(
+    async (companyName: string, projectName: string, sheetYear: number) => {
+      setLoadingSheet(true);
+      setSheetNotFound(false);
+      try {
+        const resolved = await resolvePayrollModule(accessToken, {
+          month,
+          year: sheetYear,
+          location: projectName,
+          company_name: companyName,
+        });
+        if (!resolved) {
+          setSheetVisible(false);
+          setDetail(null);
+          setEmployees([]);
+          setSheetNotFound(true);
+          const monthLabel = MONTH_OPTIONS.find((m) => m.value === month)?.label ?? String(month);
+          onStatus(
+            `No payroll sheet for ${companyName} · ${projectName} (${monthLabel} ${sheetYear}). Create one manually.`,
+          );
+          return;
+        }
+        applyResolvedSheet(resolved, companyName, projectName);
+      } catch (error) {
+        setSheetVisible(false);
+        setDetail(null);
+        setEmployees([]);
+        setSheetNotFound(false);
+        onStatus(error instanceof Error ? error.message : 'Failed to load payroll sheet.');
+      } finally {
+        setLoadingSheet(false);
+      }
+    },
+    [accessToken, month, applyResolvedSheet, onStatus],
+  );
+
+  const handleSelectProjectFromSummary = (projectSummary: PayrollProjectAttendanceSummary) => {
+    const summaryYear = attendanceSummary?.year ?? year;
+    const companyName = projectSummary.company_name || companyInput.trim() || company;
+    setCompanyInput(companyName);
+    setProjectInput(projectSummary.project);
+    void loadSheet(companyName, projectSummary.project, summaryYear);
+  };
+
+  const createSheet = useCallback(
+    async (companyName: string, projectName: string, sheetYear: number) => {
+      if (!canEdit) return;
+      setCreatingSheet(true);
+      setSheetNotFound(false);
+      try {
+        const created = await createPayrollModule(accessToken, {
+          month,
+          year: sheetYear,
+          location: projectName,
+          company_name: companyName,
+        });
+        applyResolvedSheet(created, companyName, projectName);
+        const monthLabel = MONTH_OPTIONS.find((m) => m.value === month)?.label ?? String(month);
+        const msg = `Created payroll sheet for ${companyName} · ${projectName} (${monthLabel} ${sheetYear}).`;
+        showToast(msg);
+        onStatus(msg);
+      } catch (error) {
+        const isConflict =
+          (error instanceof ApiError && error.status === 409) ||
+          (error instanceof Error &&
+            (error.message.includes('already exists') || error.message.includes('409')));
+        if (isConflict) {
+          const msg = 'Payroll sheet already exists — opening it now.';
+          showToast(msg);
+          onStatus(msg);
+          await loadSheet(companyName, projectName, sheetYear);
+          return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to create payroll sheet.';
+        showToast(message, 'error');
+        onStatus(message);
+      } finally {
+        setCreatingSheet(false);
+      }
+    },
+    [accessToken, month, canEdit, applyResolvedSheet, loadSheet, onStatus],
+  );
 
   useEffect(() => {
     return () => revokePayrollExportUrl(exportUrlRef.current);
@@ -257,28 +394,38 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
     try {
       if (employeeModalMode === 'add') {
         const attendance = createEmptyAttendance(detail.days_in_month);
-        const body = formToEmployeeBody(values, {
-          serial_no: employees.length + 1,
-          attendance,
-          ot: '0',
-        });
+        const body = formToEmployeeBody(
+          values,
+          {
+            serial_no: employees.length + 1,
+            attendance,
+            ot: '0',
+          },
+          detail.days_in_month,
+        );
         const created = await addPayrollEmployee(accessToken, detail.id, body);
-        setEmployees((rows) => [...rows, created]);
-        setDetail({ ...detail, employees: [...employees, created] });
+        const enriched = enrichEmployeeRow(created, detail.days_in_month);
+        setEmployees((rows) => [...rows, enriched]);
+        setDetail({ ...detail, employees: [...employees, enriched] });
         setDirty(false);
         showToast('Employee added successfully');
         setEmployeeModalOpen(false);
         setEditingEmployee(null);
         onStatus('Employee added successfully');
       } else if (editingEmployee) {
-        const body = formToEmployeeBody(values, {
-          serial_no: editingEmployee.serial_no,
-          attendance: editingEmployee.attendance ?? {},
-          ot: editingEmployee.ot,
-        });
+        const body = formToEmployeeBody(
+          values,
+          {
+            serial_no: editingEmployee.serial_no,
+            attendance: editingEmployee.attendance ?? {},
+            ot: editingEmployee.ot,
+          },
+          detail.days_in_month,
+        );
         const saved = await updatePayrollEmployee(accessToken, editingEmployee.id, body);
-        setEmployees((rows) => rows.map((r) => (r.id === saved.id ? saved : r)));
-        setDetail({ ...detail, employees: employees.map((r) => (r.id === saved.id ? saved : r)) });
+        const enriched = enrichEmployeeRow(saved, detail.days_in_month);
+        setEmployees((rows) => rows.map((r) => (r.id === saved.id ? enriched : r)));
+        setDetail({ ...detail, employees: employees.map((r) => (r.id === saved.id ? enriched : r)) });
         setDirty(false);
         showToast('Employee updated successfully');
         setEmployeeModalOpen(false);
@@ -403,10 +550,10 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
       monthLabel,
       year,
       projectName: project,
-      companyName: detail?.company_name ?? 'MC.Engg',
+      companyName: company || detail?.company_name || 'MC.Engg',
       daysInMonth: detail?.days_in_month ?? 0,
     }),
-    [monthLabel, year, project, detail?.company_name, detail?.days_in_month],
+    [monthLabel, year, project, company, detail?.company_name, detail?.days_in_month],
   );
 
   const handleShareNotify = (message: string, variant: 'success' | 'error' = 'success') => {
@@ -429,41 +576,74 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
     return Array.from({ length: 7 }, (_, i) => base - 3 + i);
   }, [year]);
 
-  const applySheetFilters = () => {
-    let nextProject = project;
-    const trimmedProject = projectInput.trim();
-    if (!trimmedProject) {
-      setProjectInput(project);
-    } else if (trimmedProject !== project) {
-      nextProject = trimmedProject;
-      setProject(trimmedProject);
-      setProjects((prev) => (prev.includes(trimmedProject) ? prev : [trimmedProject, ...prev]));
+  const parseSheetSelection = (raw: PayrollSheetSelectionInput) => {
+    const trimmedCompany = raw.company.trim();
+    const trimmedProject = raw.project.trim();
+    setCompanyInput(trimmedCompany);
+    setProjectInput(trimmedProject);
+    setYearInput(raw.yearRaw.trim());
+    if (!trimmedCompany || !trimmedProject) {
+      const msg = 'Enter both company and project.';
+      showToast(msg, 'error');
+      onStatus(msg);
+      return null;
     }
-
-    const parsedYear = Number.parseInt(yearInput.trim(), 10);
+    const parsedYear = Number.parseInt(raw.yearRaw.trim(), 10);
     if (!Number.isFinite(parsedYear) || parsedYear < 2000 || parsedYear > 2100) {
       setYearInput(String(year));
-      return;
+      const msg = 'Enter a valid year between 2000 and 2100.';
+      showToast(msg, 'error');
+      onStatus(msg);
+      return null;
     }
-
-    const projectChanged = nextProject !== project;
-    const yearChanged = parsedYear !== year;
-    if (yearChanged) setYear(parsedYear);
-    if (!projectChanged && !yearChanged) return;
+    setYear(parsedYear);
+    return { company: trimmedCompany, project: trimmedProject, year: parsedYear };
   };
 
-  if (loading) {
+  const handleLoadSheet = (raw: PayrollSheetSelectionInput) => {
+    const selection = parseSheetSelection(raw);
+    if (!selection) return;
+    void loadSheet(selection.company, selection.project, selection.year);
+  };
+
+  const handleCreateSheet = (raw: PayrollSheetSelectionInput) => {
+    if (!canEdit) return;
+    const selection = parseSheetSelection(raw);
+    if (!selection) return;
+    void createSheet(selection.company, selection.project, selection.year);
+  };
+
+  const handleMonthChange = (nextMonth: number) => {
+    setMonth(nextMonth);
+    if (!sheetVisible || !company.trim() || !project.trim()) return;
+    const parsedYear = Number.parseInt(yearInput.trim(), 10);
+    const sheetYear =
+      Number.isFinite(parsedYear) && parsedYear >= 2000 && parsedYear <= 2100 ? parsedYear : year;
+    void loadSheet(company, project, sheetYear);
+  };
+
+  const handleBackToDashboard = () => {
+    if (dirty && canEdit && !window.confirm('You have unsaved attendance changes. Leave without saving?')) {
+      return;
+    }
+    setSheetVisible(false);
+    setDetail(null);
+    setEmployees([]);
+    setSheetNotFound(false);
+    setDirty(false);
+    setSearch('');
+    setDesignationFilter('');
+    setCompany('');
+    setCompanyInput('');
+    setProject('');
+    setProjectInput('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  if (bootstrapping) {
     return (
       <div className="flex min-h-[12rem] items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
-        <p className="text-sm font-medium text-slate-600">Loading salary sheet…</p>
-      </div>
-    );
-  }
-
-  if (!detail) {
-    return (
-      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
-        <p className="text-sm text-slate-600">No salary sheet available. Check API connection and permissions.</p>
+        <p className="text-sm font-medium text-slate-600">Loading payroll options…</p>
       </div>
     );
   }
@@ -471,8 +651,25 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   return (
     <div className="salaries-page space-y-4 print:space-y-2">
       <header>
-        <h2 className="text-xl font-bold tracking-tight text-slate-900">Salaries</h2>
-        <p className="text-sm text-slate-600">Industrial payroll · attendance register · MC.Engg format</p>
+        {sheetVisible && (
+          <button
+            type="button"
+            onClick={handleBackToDashboard}
+            className="mb-3 inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-900 print:hidden"
+            title="Back to attendance overview"
+          >
+            <IconArrowLeft className="h-4 w-4" />
+            <span className="hidden sm:inline">Overview</span>
+          </button>
+        )}
+        <div>
+          <h2 className="text-xl font-bold tracking-tight text-slate-900">Payroll</h2>
+          <p className="text-sm text-slate-600">
+            {sheetVisible && detail
+              ? `${buildPayrollModuleTitle(detail.month, detail.year, detail.location, detail.company_name)} · attendance register`
+              : 'Industrial payroll · attendance register · select company and project to begin'}
+          </p>
+        </div>
       </header>
 
       {exportNotice && (
@@ -508,18 +705,25 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
           month={month}
           yearInput={yearInput}
           yearSuggestions={yearSuggestions}
+          companyInput={companyInput}
+          companies={companies}
           projectInput={projectInput}
           projects={projects}
           search={search}
           designationFilter={designationFilter}
           designations={designations}
+          sheetReady={sheetVisible}
+          loadingSheet={loadingSheet}
+          creatingSheet={creatingSheet}
           canEdit={canEdit}
           dirty={dirty}
           saving={saving}
-          onMonthChange={setMonth}
+          onMonthChange={handleMonthChange}
           onYearInputChange={setYearInput}
+          onCompanyInputChange={setCompanyInput}
           onProjectInputChange={setProjectInput}
-          onSheetApply={applySheetFilters}
+          onLoadSheet={handleLoadSheet}
+          onCreateSheet={handleCreateSheet}
           onSearchChange={setSearch}
           onDesignationFilterChange={setDesignationFilter}
           onAddEmployee={openAddEmployeeModal}
@@ -533,9 +737,92 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
         />
       </div>
 
+      {!sheetVisible && (
+        <PayrollSummaryDashboard
+          summary={attendanceSummary}
+          loading={loadingSummary}
+          onSelectProject={handleSelectProjectFromSummary}
+        />
+      )}
+
+      {!sheetVisible && !loadingSheet && !creatingSheet && !loadingSummary && (attendanceSummary?.projects.length ?? 0) === 0 && (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center">
+          {sheetNotFound ? (
+            <>
+              <p className="text-base font-semibold text-slate-800">No payroll sheet found</p>
+              <p className="mt-2 text-sm text-slate-600">
+                No sheet exists for <span className="font-semibold">{companyInput || company}</span> ·{' '}
+                <span className="font-semibold">{projectInput || project}</span> (
+                {MONTH_OPTIONS.find((m) => m.value === month)?.label} {yearInput}).
+              </p>
+              {canEdit ? (
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCreateSheet({
+                        company: companyInput || company,
+                        project: projectInput || project,
+                        yearRaw: yearInput,
+                      })
+                    }
+                    disabled={creatingSheet || loadingSheet}
+                    className="rounded bg-sky-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {creatingSheet ? 'Creating…' : 'Create Payroll Sheet'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleLoadSheet({
+                        company: companyInput || company,
+                        project: projectInput || project,
+                        yearRaw: yearInput,
+                      })
+                    }
+                    disabled={creatingSheet || loadingSheet}
+                    className="rounded border border-sky-700 bg-white px-5 py-2.5 text-sm font-semibold text-sky-800 shadow-sm hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Load Sheet
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-slate-600">Ask an admin to create the payroll sheet.</p>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-base font-semibold text-slate-800">No payroll sheet loaded</p>
+              <p className="mt-2 text-sm text-slate-600">
+                Choose a company and project above, then click <span className="font-semibold">Load Sheet</span> to open an
+                existing register
+                {canEdit && (
+                  <>
+                    {' '}
+                    or <span className="font-semibold">Create Payroll Sheet</span> to start a new one
+                  </>
+                )}
+                .
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
+      {(loadingSheet || creatingSheet) && !sheetVisible && (
+        <div className="flex min-h-[10rem] items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
+          <p className="text-sm font-medium text-slate-600">
+            {creatingSheet ? 'Creating payroll sheet…' : 'Loading payroll sheet…'}
+          </p>
+        </div>
+      )}
+
+      {sheetVisible && detail && (
       <div className="salaries-print-target">
         <div className="salaries-print-meta hidden">
-          <p className="text-sm font-bold text-slate-900">{detail.title}</p>
+          <p className="text-sm font-bold text-slate-900">
+            {buildPayrollModuleTitle(detail.month, detail.year, detail.location, detail.company_name)}
+          </p>
           <p className="text-xs text-slate-600">
             {monthLabel} {year} · {project} · Printed {new Date().toLocaleString('en-IN')}
           </p>
@@ -556,8 +843,9 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
           onOpenPayslip={setPayslipEmployee}
         />
       </div>
+      )}
 
-      {dirty && canEdit && (
+      {sheetVisible && dirty && canEdit && (
         <p className="print:hidden text-xs font-medium text-amber-700">Unsaved changes — click Save Attendance before leaving.</p>
       )}
 
@@ -591,6 +879,9 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
         defaultProject={project}
         projects={projects}
         editingRow={editingEmployee}
+        daysInMonth={detail?.days_in_month ?? 0}
+        moduleYear={year}
+        existingEmpIds={employees.map((e) => e.emp_id)}
         saving={employeeFormSaving}
         onClose={closeEmployeeModal}
         onSave={(values) => void handleSaveEmployeeForm(values)}

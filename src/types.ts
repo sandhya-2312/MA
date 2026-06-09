@@ -21,6 +21,7 @@ export type Project = {
   description: string;
   parameter: string;
   location?: string;
+  companyName?: string;
   dateOfCommitment?: string;
   plannedFinishDate?: string;
   materials?: Array<{ name: string; dimensions: string; quantity?: string }>;

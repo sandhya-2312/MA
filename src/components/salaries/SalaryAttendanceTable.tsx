@@ -3,17 +3,19 @@ import { editIconButtonClass, IconPencil } from '../actionIcons.tsx';
 import type { PayrollEmployeeRow, PayrollModuleDetail } from '../../services/payrollApi.ts';
 import {
   attendanceCellClass,
+  calcOtAmount,
   formatDayLabel,
   parseDayAttendance,
 } from '../../utils/attendance.ts';
 import type { PayrollShareContext } from '../../utils/payrollShare.ts';
 import {
   buildMonthCalendar,
+  buildPayrollModuleTitle,
   calcRowFinalPayment,
+  derivePayRatesFromMonthlySalary,
   countTotalDays,
   countTotalOtHours,
   formatInr,
-  rowOtAmount,
   rowOtRate,
 } from '../../utils/payroll.ts';
 import { AttendanceShareButtons } from './AttendanceShareButtons.tsx';
@@ -59,17 +61,20 @@ export function SalaryAttendanceTable({
   return (
     <div className="salaries-sheet overflow-hidden rounded-lg border border-slate-400 bg-white shadow-md print:overflow-visible print:rounded-none print:shadow-none">
       <div className="border-b border-slate-300 bg-sky-100/80 px-4 py-2.5 text-center">
-        <h3 className="text-sm font-bold tracking-tight text-slate-900 sm:text-base">{detail.title}</h3>
+        <h3 className="text-sm font-bold tracking-tight text-slate-900 sm:text-base">
+          {buildPayrollModuleTitle(detail.month, detail.year, detail.location, detail.company_name)}
+        </h3>
       </div>
       <div className="salaries-sheet-scroll max-h-[calc(100vh-18rem)] overflow-auto print:max-h-none print:overflow-visible">
         <table className="salaries-table w-full min-w-[1100px] border-collapse text-[11px] print:min-w-0 print:text-[8px]">
           <thead className="sticky top-0 z-20 print:static">
             <tr className="bg-slate-200 text-slate-800">
               <th className="sticky left-0 z-30 min-w-[2.25rem] border border-slate-400 bg-slate-200 px-1 py-1">S.No</th>
-              <th className="sticky left-[2.25rem] z-30 min-w-[7rem] border border-slate-400 bg-slate-200 px-1.5 py-1 text-left">
+              <th className="sticky left-[2.25rem] z-30 min-w-[3rem] border border-slate-400 bg-slate-200 px-1 py-1">EMP ID</th>
+              <th className="sticky left-[5.25rem] z-30 min-w-[7rem] border border-slate-400 bg-slate-200 px-1.5 py-1 text-left">
                 Employee Name
               </th>
-              <th className="sticky left-[9.25rem] z-30 min-w-[5.5rem] border border-slate-400 bg-slate-200 px-1.5 py-1 text-left">
+              <th className="sticky left-[12.25rem] z-30 min-w-[5.5rem] border border-slate-400 bg-slate-200 px-1.5 py-1 text-left">
                 Designation
               </th>
               {days.map(({ day, weekday, isSunday }) => (
@@ -97,7 +102,8 @@ export function SalaryAttendanceTable({
             <tr className="bg-slate-100 text-slate-900">
               <th className="sticky left-0 z-30 border border-slate-400 bg-slate-100" />
               <th className="sticky left-[2.25rem] z-30 border border-slate-400 bg-slate-100" />
-              <th className="sticky left-[9.25rem] z-30 border border-slate-400 bg-slate-100" />
+              <th className="sticky left-[5.25rem] z-30 border border-slate-400 bg-slate-100" />
+              <th className="sticky left-[12.25rem] z-30 border border-slate-400 bg-slate-100" />
               {days.map(({ day, isSunday }) => (
                 <th
                   key={`d-${day}`}
@@ -112,7 +118,7 @@ export function SalaryAttendanceTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={3 + days.length + TAIL_COLS} className="border border-slate-300 px-4 py-8 text-center text-slate-500">
+                <td colSpan={4 + days.length + TAIL_COLS} className="border border-slate-300 px-4 py-8 text-center text-slate-500">
                   No employees match filters. Add an employee or clear filters.
                 </td>
               </tr>
@@ -120,19 +126,29 @@ export function SalaryAttendanceTable({
               rows.map((row, rowIndex) => {
                 const totalDays = row.total_days ?? countTotalDays(row.attendance);
                 const totalOtHrs = row.total_ot_hours ?? countTotalOtHours(row.attendance);
-                const otRate = rowOtRate(row);
-                const otAmount = rowOtAmount(row);
-                const payment = calcRowFinalPayment(row, daysInMonth);
+                const monthlySalary = row.monthly_salary ?? 0;
+                const derivedRates =
+                  monthlySalary > 0 ? derivePayRatesFromMonthlySalary(monthlySalary, daysInMonth) : null;
+                const displayWage = derivedRates?.wage ?? row.wage;
+                const otRate = derivedRates?.otRate ?? rowOtRate(row);
+                const otAmount = calcOtAmount(totalOtHrs, otRate);
+                const payment = calcRowFinalPayment(
+                  { ...row, wage: displayWage, ot: String(otRate) },
+                  daysInMonth,
+                );
                 const stripe = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50/90';
                 return (
                   <tr key={row.id} className={`${stripe} hover:bg-sky-50/50`}>
                     <td className={`sticky left-0 z-10 border border-slate-300 ${stripe} px-1 py-0.5 text-center font-medium`}>
                       {row.serial_no}
                     </td>
-                    <td className={`sticky left-[2.25rem] z-10 border border-slate-300 ${stripe} px-1 py-0.5`}>
+                    <td className={`sticky left-[2.25rem] z-10 border border-slate-300 ${stripe} px-1 py-0.5 text-center font-medium tabular-nums`}>
+                      {row.emp_id ?? '—'}
+                    </td>
+                    <td className={`sticky left-[5.25rem] z-10 border border-slate-300 ${stripe} px-1 py-0.5`}>
                       <span className="block px-0.5 py-0.5 text-[11px] font-medium text-slate-900">{row.name}</span>
                     </td>
-                    <td className={`sticky left-[9.25rem] z-10 border border-slate-300 ${stripe} px-1 py-0.5`}>
+                    <td className={`sticky left-[12.25rem] z-10 border border-slate-300 ${stripe} px-1 py-0.5`}>
                       <span className="block px-0.5 py-0.5 text-[11px] text-slate-800">{row.designation ?? '—'}</span>
                     </td>
                     {days.map(({ day, isSunday }) => {
@@ -164,10 +180,16 @@ export function SalaryAttendanceTable({
                         type="number"
                         min={0}
                         value={otRate}
-                        readOnly={!canEdit}
+                        readOnly={monthlySalary > 0 || !canEdit}
                         onChange={(e) => onPatchRow(row.id, { ot: e.target.value })}
-                        className="w-full min-w-[2.5rem] border-0 bg-transparent text-right text-[10px] tabular-nums focus:outline focus:outline-1 focus:outline-violet-500"
-                        title="OT rate per hour"
+                        className={`w-full min-w-[2.5rem] border-0 bg-transparent text-right text-[10px] tabular-nums ${
+                          monthlySalary > 0 ? 'text-violet-900' : 'focus:outline focus:outline-1 focus:outline-violet-500'
+                        }`}
+                        title={
+                          monthlySalary > 0
+                            ? 'Calculated from monthly salary (daily wage ÷ 8)'
+                            : 'OT rate per hour'
+                        }
                       />
                     </td>
                     <td className="border border-slate-300 px-1.5 py-0.5 text-right font-semibold tabular-nums text-violet-900">
@@ -186,10 +208,17 @@ export function SalaryAttendanceTable({
                     <td className="border border-slate-300 px-1 py-0.5">
                       <input
                         type="number"
-                        value={row.wage}
-                        readOnly={!canEdit}
+                        value={displayWage}
+                        readOnly={monthlySalary > 0 || !canEdit}
                         onChange={(e) => onPatchRow(row.id, { wage: Number(e.target.value) || 0 })}
-                        className="w-full border-0 bg-transparent text-right tabular-nums focus:outline focus:outline-1 focus:outline-sky-500"
+                        className={`w-full border-0 bg-transparent text-right tabular-nums ${
+                          monthlySalary > 0 ? 'text-slate-800' : 'focus:outline focus:outline-1 focus:outline-sky-500'
+                        }`}
+                        title={
+                          monthlySalary > 0
+                            ? `Calculated from monthly salary ÷ ${daysInMonth} days`
+                            : 'Daily wage'
+                        }
                       />
                     </td>
                     <td className="border border-slate-300 px-1 py-0.5">
@@ -197,7 +226,18 @@ export function SalaryAttendanceTable({
                         type="number"
                         value={row.monthly_salary ?? 0}
                         readOnly={!canEdit}
-                        onChange={(e) => onPatchRow(row.id, { monthly_salary: Number(e.target.value) || 0 })}
+                        onChange={(e) => {
+                          const monthly_salary = Number(e.target.value) || 0;
+                          if (monthly_salary > 0) {
+                            const { wage, otRate: derivedOt } = derivePayRatesFromMonthlySalary(
+                              monthly_salary,
+                              daysInMonth,
+                            );
+                            onPatchRow(row.id, { monthly_salary, wage, ot: String(derivedOt) });
+                            return;
+                          }
+                          onPatchRow(row.id, { monthly_salary });
+                        }}
                         className="w-full border-0 bg-transparent text-right tabular-nums focus:outline focus:outline-1 focus:outline-sky-500"
                       />
                     </td>
