@@ -3,6 +3,7 @@ import type { PayrollEmployeeBody, PayrollEmployeeRow, PayrollModuleDetail, Payr
 import {
   addPayrollEmployee,
   createPayrollModule,
+  deletePayrollModule,
   fetchPayrollAttendanceSummary,
   listPayrollCompanies,
   listPayrollLocations,
@@ -120,6 +121,8 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
   const [payslipEmployee, setPayslipEmployee] = useState<PayrollEmployeeRow | null>(null);
   const [attendanceSummary, setAttendanceSummary] = useState<PayrollAttendanceSummary | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const [deletingModuleId, setDeletingModuleId] = useState<number | null>(null);
+  const [deleteConfirmProject, setDeleteConfirmProject] = useState<PayrollProjectAttendanceSummary | null>(null);
   const exportUrlRef = useRef<string | null>(null);
   const exportNoticeRef = useRef<HTMLDivElement | null>(null);
 
@@ -177,32 +180,57 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
     };
   }, [accessToken, onStatus]);
 
-  useEffect(() => {
-    if (sheetVisible) return;
-    let cancelled = false;
+  const refreshAttendanceSummary = useCallback(async () => {
     const parsedYear = Number.parseInt(yearInput.trim(), 10);
     const summaryYear =
       Number.isFinite(parsedYear) && parsedYear >= 2000 && parsedYear <= 2100 ? parsedYear : year;
+    setLoadingSummary(true);
+    try {
+      const summary = await fetchPayrollAttendanceSummary(accessToken, {
+        month,
+        year: summaryYear,
+      });
+      setAttendanceSummary(summary);
+    } catch {
+      setAttendanceSummary(null);
+    } finally {
+      setLoadingSummary(false);
+    }
+  }, [accessToken, month, year, yearInput]);
 
-    (async () => {
-      setLoadingSummary(true);
-      try {
-        const summary = await fetchPayrollAttendanceSummary(accessToken, {
-          month,
-          year: summaryYear,
-        });
-        if (!cancelled) setAttendanceSummary(summary);
-      } catch {
-        if (!cancelled) setAttendanceSummary(null);
-      } finally {
-        if (!cancelled) setLoadingSummary(false);
+  useEffect(() => {
+    if (sheetVisible) return;
+    void refreshAttendanceSummary();
+  }, [sheetVisible, refreshAttendanceSummary]);
+
+  const requestDeleteProject = (projectSummary: PayrollProjectAttendanceSummary) => {
+    if (!canEdit) return;
+    setDeleteConfirmProject(projectSummary);
+  };
+
+  const confirmDeleteProject = async () => {
+    if (!deleteConfirmProject || !canEdit) return;
+    const projectSummary = deleteConfirmProject;
+    setDeletingModuleId(projectSummary.module_id);
+    try {
+      await deletePayrollModule(accessToken, projectSummary.module_id);
+      if (detail?.id === projectSummary.module_id) {
+        setSheetVisible(false);
+        setDetail(null);
+        setEmployees([]);
       }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, month, year, yearInput, sheetVisible]);
+      setDeleteConfirmProject(null);
+      showToast('Payroll sheet deleted');
+      onStatus('Payroll sheet deleted');
+      await refreshAttendanceSummary();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Could not delete payroll sheet.';
+      showToast(msg, 'error');
+      onStatus(msg);
+    } finally {
+      setDeletingModuleId(null);
+    }
+  };
 
   const applyResolvedSheet = useCallback(
     (resolved: PayrollModuleDetail, companyName: string, projectName: string) => {
@@ -741,7 +769,10 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
         <PayrollSummaryDashboard
           summary={attendanceSummary}
           loading={loadingSummary}
+          canEdit={canEdit}
+          deletingModuleId={deletingModuleId}
           onSelectProject={handleSelectProjectFromSummary}
+          onDeleteProject={requestDeleteProject}
         />
       )}
 
@@ -889,6 +920,50 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
       />
 
       <Toast message={toastMessage} variant={toastVariant} onDismiss={() => setToastMessage(null)} />
+
+      {deleteConfirmProject !== null && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && deletingModuleId === null) setDeleteConfirmProject(null);
+          }}
+        >
+          <div className="w-full max-w-[420px] rounded-lg border border-slate-200 bg-white p-5 shadow-lg">
+            <h3 className="text-base font-bold text-slate-900">Delete payroll sheet?</h3>
+            <p className="mt-2 text-sm text-slate-700">
+              Delete payroll sheet for{' '}
+              <span className="font-semibold">
+                {[deleteConfirmProject.company_name, deleteConfirmProject.project].filter(Boolean).join(' · ')}
+              </span>
+              ? This permanently removes all employees and attendance for{' '}
+              <span className="font-semibold">
+                {monthLabel} {attendanceSummary?.year ?? yearInput}
+              </span>
+              .
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => setDeleteConfirmProject(null)}
+                disabled={deletingModuleId !== null}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void confirmDeleteProject()}
+                disabled={deletingModuleId !== null}
+              >
+                {deletingModuleId !== null ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteConfirmEmployeeId !== null && (
         <div

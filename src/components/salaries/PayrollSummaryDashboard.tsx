@@ -1,10 +1,14 @@
 import type { PayrollAttendanceSummary, PayrollProjectAttendanceSummary } from '../../services/payrollApi.ts';
 import { MONTH_OPTIONS } from '../../utils/payroll.ts';
+import { deleteIconButtonClass, IconTrash } from '../actionIcons.tsx';
 
 type PayrollSummaryDashboardProps = {
   summary: PayrollAttendanceSummary | null;
   loading: boolean;
+  canEdit: boolean;
+  deletingModuleId: number | null;
   onSelectProject: (project: PayrollProjectAttendanceSummary) => void;
+  onDeleteProject: (project: PayrollProjectAttendanceSummary) => void;
 };
 
 function StatPill({
@@ -34,41 +38,76 @@ function StatPill({
 function ProjectCard({
   project,
   onSelect,
+  onDelete,
+  canDelete,
+  deleting,
 }: {
   project: PayrollProjectAttendanceSummary;
   onSelect: () => void;
+  onDelete: () => void;
+  canDelete: boolean;
+  deleting: boolean;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className="group flex w-full flex-col rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-sky-300 hover:shadow-md"
-    >
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          <h4 className="text-sm font-bold text-slate-900 group-hover:text-sky-800">{project.project}</h4>
-          {project.company_name && (
-            <p className="text-xs text-slate-500">{project.company_name}</p>
+    <div className="group relative rounded-lg border border-slate-200 bg-white shadow-sm transition hover:border-sky-300 hover:shadow-md">
+      {canDelete && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          disabled={deleting}
+          className={`${deleteIconButtonClass} absolute right-3 top-3 z-10 opacity-0 transition group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto disabled:opacity-50`}
+          title="Delete payroll sheet"
+          aria-label={`Delete payroll sheet for ${project.project}`}
+        >
+          {deleting ? (
+            <span className="text-[10px] font-bold">…</span>
+          ) : (
+            <IconTrash className="h-4 w-4" />
           )}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onSelect}
+        disabled={deleting}
+        className="flex w-full flex-col p-4 text-left disabled:cursor-wait disabled:opacity-70"
+      >
+        <div className="mb-3 flex items-start justify-between gap-2 pr-8">
+          <div>
+            <h4 className="text-sm font-bold text-slate-900 group-hover:text-sky-800">{project.project}</h4>
+            {project.company_name && (
+              <p className="text-xs text-slate-500">{project.company_name}</p>
+            )}
+          </div>
+          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700 transition group-hover:opacity-60">
+            {project.employee_count} emp
+          </span>
         </div>
-        <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
-          {project.employee_count} emp
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <StatPill label="Present" value={project.present_days} tone="emerald" />
-        <StatPill label="OT Hrs" value={project.ot_hours} tone="violet" />
-        <StatPill label="Absent" value={project.absent_days} tone="rose" />
-        <StatPill label="Half Days" value={project.half_days} tone="amber" />
-      </div>
-      <p className="mt-3 text-xs font-medium text-sky-700 opacity-0 transition group-hover:opacity-100">
-        Click to open payroll sheet →
-      </p>
-    </button>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <StatPill label="Present" value={project.present_days} tone="emerald" />
+          <StatPill label="OT Hrs" value={project.ot_hours} tone="violet" />
+          <StatPill label="Absent" value={project.absent_days} tone="rose" />
+          <StatPill label="Half Days" value={project.half_days} tone="amber" />
+        </div>
+        <p className="mt-3 text-xs font-medium text-sky-700 opacity-0 transition group-hover:opacity-100">
+          Click to open payroll sheet →
+        </p>
+      </button>
+    </div>
   );
 }
 
-export function PayrollSummaryDashboard({ summary, loading, onSelectProject }: PayrollSummaryDashboardProps) {
+export function PayrollSummaryDashboard({
+  summary,
+  loading,
+  canEdit,
+  deletingModuleId,
+  onSelectProject,
+  onDeleteProject,
+}: PayrollSummaryDashboardProps) {
   const monthLabel = summary
     ? MONTH_OPTIONS.find((m) => m.value === summary.month)?.label ?? String(summary.month)
     : '';
@@ -123,6 +162,9 @@ export function PayrollSummaryDashboard({ summary, loading, onSelectProject }: P
             key={project.module_id}
             project={project}
             onSelect={() => onSelectProject(project)}
+            onDelete={() => onDeleteProject(project)}
+            canDelete={canEdit}
+            deleting={deletingModuleId === project.module_id}
           />
         ))}
       </div>
