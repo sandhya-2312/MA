@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { AdminProjectsSection } from './AdminProjectsSection';
+import { BrandLogo } from './BrandLogo.tsx';
+import { NotificationsMenu } from './NotificationsMenu.tsx';
+import type { AppNotification } from '../utils/notifications';
 import { AllProjectsSummaryStrip } from './AllProjectsSummaryStrip';
 import { ProjectSummaryPage } from './ProjectSummaryPage';
 import {
@@ -675,7 +678,7 @@ export function DashboardPage({
   const [showDashboardCreateProject, setShowDashboardCreateProject] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [requestedAdminEditProjectId, setRequestedAdminEditProjectId] = useState<number | null>(null);
   const [requestedUserProjectId, setRequestedUserProjectId] = useState<number | null>(null);
   const [projectFilterId, setProjectFilterId] = useState<number | 'all'>('all');
@@ -744,7 +747,7 @@ export function DashboardPage({
     activeTab === 'projectSummary'
       ? ''
       : activeTab === 'dashboard'
-          ? 'Metal Works Control Center'
+          ? 'MC.Engineering Control Center'
           : activeTab === 'projects'
             ? isAdmin || loggedInUser.role === 'Viewer'
               ? ''
@@ -762,12 +765,23 @@ export function DashboardPage({
 
   const closeMobileNav = () => setMobileNavOpen(false);
 
-  const toggleHamburger = () => {
-    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+  const handleNotificationNavigate = (notification: AppNotification) => {
+    if (notification.tab) setActiveTab(notification.tab);
+    if (notification.projectId != null) openProjectSummary(notification.projectId);
+    setUserMenuOpen(false);
+  };
+
+  const isMobileViewport = () =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
+
+  const menuIsOpen = isMobileViewport() ? mobileNavOpen : sidebarOpen;
+
+  const toggleMenu = () => {
+    if (isMobileViewport()) {
       setMobileNavOpen((open) => !open);
-    } else {
-      setSidebarCollapsed((c) => !c);
+      return;
     }
+    setSidebarOpen((open) => !open);
   };
 
   const adminTotalEntries = useMemo(
@@ -1172,25 +1186,41 @@ export function DashboardPage({
             <div className="px-3 py-3 sm:px-4 sm:py-3.5 md:px-6 md:py-4">
               <div className="flex w-full min-w-0 items-center justify-between gap-3 sm:gap-4">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={toggleMenu}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-800 transition hover:bg-slate-100 md:hidden"
+                    aria-label={menuIsOpen ? 'Close menu' : 'Open menu'}
+                    aria-expanded={menuIsOpen}
+                  >
+                    {menuIsOpen ? (
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                        <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                        <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" />
+                      </svg>
+                    )}
+                  </button>
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-600 to-slate-800 text-xs font-bold tracking-tight text-white">
-                      MW
-                    </div>
+                    <BrandLogo className="h-12 w-auto max-w-[140px] shrink-0 object-contain" />
                     <div className="min-w-0">
-                      <p className="truncate text-base font-semibold text-slate-800">Metal Works</p>
+                      <p className="truncate text-base font-semibold text-slate-800">MC.Engineering</p>
                     </div>
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-row items-center gap-2 sm:gap-3">
-                  <button
-                    type="button"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-700 transition hover:bg-slate-100"
-                    aria-label="Notifications"
-                  >
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                      <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
+                  <NotificationsMenu
+                    userId={loggedInUser.id}
+                    isAdmin={isAdmin}
+                    projects={projects}
+                    visibleProjects={visibleProjects}
+                    users={users}
+                    onNavigate={handleNotificationNavigate}
+                    dismissWhen={userMenuOpen}
+                    onMenuOpen={() => setUserMenuOpen(false)}
+                  />
 
                   <div className="relative" ref={userMenuRef}>
                     <button
@@ -1258,53 +1288,60 @@ export function DashboardPage({
 
           <div className="flex min-h-0 flex-1 overflow-hidden">
             <aside
-              className={`z-20 hidden min-h-0 shrink-0 flex-col self-stretch overflow-hidden border-r border-slate-200/90 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.05)] md:flex md:flex-col ${sidebarCollapsed ? 'md:w-16' : 'md:w-52'}`}
+              className={`z-20 hidden min-h-0 shrink-0 flex-col self-stretch overflow-hidden border-r border-slate-200/90 bg-white shadow-[0_6px_16px_rgba(0,0,0,0.05)] transition-[width] duration-200 md:flex md:flex-col ${sidebarOpen ? 'md:w-52' : 'md:w-16'}`}
             >
-              <div className={`hidden shrink-0 px-2 pt-3 md:flex ${sidebarCollapsed ? 'md:justify-center' : 'md:justify-end'}`}>
+              <div className={`hidden shrink-0 px-2 pt-3 md:flex ${sidebarOpen ? 'md:justify-end' : 'md:justify-center'}`}>
                 <button
                   type="button"
-                  onClick={toggleHamburger}
+                  onClick={toggleMenu}
                   className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-800 transition hover:bg-slate-100"
-                  aria-label="Collapse sidebar"
+                  aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
+                  aria-expanded={sidebarOpen}
                 >
-                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                    <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" />
-                  </svg>
+                  {sidebarOpen ? (
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                      <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                      <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" />
+                    </svg>
+                  )}
                 </button>
               </div>
               <nav className="no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 pb-3 pt-3">
                 <button type="button" onClick={() => setActiveTab('dashboard')} className={navButtonClass('dashboard')}>
-                  <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
+                  <span className={`inline-flex items-center gap-2 ${sidebarOpen ? '' : 'w-full justify-center'}`}>
                     <IconNavDashboard />
-                    {!sidebarCollapsed && 'Dashboard'}
+                    {sidebarOpen && 'Dashboard'}
                   </span>
                 </button>
                 <button type="button" onClick={() => setActiveTab('projects')} className={navButtonClass('projects')}>
-                  <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
+                  <span className={`inline-flex items-center gap-2 ${sidebarOpen ? '' : 'w-full justify-center'}`}>
                     <IconNavProjects />
-                    {!sidebarCollapsed && (isAdmin || loggedInUser.role === 'Viewer' ? 'All Projects' : 'My Projects')}
+                    {sidebarOpen && (isAdmin || loggedInUser.role === 'Viewer' ? 'All Projects' : 'My Projects')}
                   </span>
                 </button>
                 {isAdmin && (
                   <button type="button" onClick={() => setActiveTab('members')} className={navButtonClass('members')}>
-                    <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
+                    <span className={`inline-flex items-center gap-2 ${sidebarOpen ? '' : 'w-full justify-center'}`}>
                       <IconNavMembers />
-                      {!sidebarCollapsed && 'Members'}
+                      {sidebarOpen && 'Members'}
                     </span>
                   </button>
                 )}
                 {isAdmin && (
                   <button type="button" onClick={() => setActiveTab('payroll')} className={navButtonClass('payroll')}>
-                    <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
+                    <span className={`inline-flex items-center gap-2 ${sidebarOpen ? '' : 'w-full justify-center'}`}>
                       <IconNavPayroll />
-                      {!sidebarCollapsed && 'Payroll'}
+                      {sidebarOpen && 'Payroll'}
                     </span>
                   </button>
                 )}
                 <button type="button" onClick={() => setActiveTab('profile')} className={navButtonClass('profile')}>
-                  <span className={`inline-flex items-center gap-2 ${sidebarCollapsed ? 'w-full justify-center' : ''}`}>
+                  <span className={`inline-flex items-center gap-2 ${sidebarOpen ? '' : 'w-full justify-center'}`}>
                     <IconNavProfile />
-                    {!sidebarCollapsed && 'Profile'}
+                    {sidebarOpen && 'Profile'}
                   </span>
                 </button>
               </nav>
@@ -1313,12 +1350,12 @@ export function DashboardPage({
                 <button
                   type="button"
                   onClick={() => setSessionUserId(null)}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-rose-600 transition hover:bg-rose-50"
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-rose-600 transition hover:bg-rose-50 ${sidebarOpen ? '' : 'justify-center'}`}
                 >
                   <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
                     <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  {!sidebarCollapsed && 'Log out'}
+                  {sidebarOpen && 'Log out'}
                 </button>
               </div>
             </aside>
@@ -1332,6 +1369,18 @@ export function DashboardPage({
               onClick={closeMobileNav}
             />
             <aside className="fixed inset-y-0 left-0 z-50 flex h-dvh max-h-dvh w-[min(100%,16rem)] min-w-0 flex-col overflow-hidden rounded-r-2xl border border-slate-200/90 bg-white p-4 shadow-xl md:hidden">
+              <div className="mb-2 flex shrink-0 justify-end">
+                <button
+                  type="button"
+                  onClick={closeMobileNav}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-800 transition hover:bg-slate-100"
+                  aria-label="Close menu"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                    <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
               <nav className="no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pt-2">
                 <button
                   type="button"

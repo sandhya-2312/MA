@@ -578,7 +578,7 @@ export function SalariesPage({ accessToken, role, onStatus }: SalariesPageProps)
       monthLabel,
       year,
       projectName: project,
-      companyName: company || detail?.company_name || 'MC.Engg',
+      companyName: company || detail?.company_name || 'MC.Engineering',
       daysInMonth: detail?.days_in_month ?? 0,
     }),
     [monthLabel, year, project, company, detail?.company_name, detail?.days_in_month],

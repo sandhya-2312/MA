@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import { BrandLogo } from './BrandLogo.tsx';
 
 type LoginPageProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -15,11 +16,8 @@ export function LoginPage({ onSubmit, loginError }: LoginPageProps) {
       <main className="flex flex-1 flex-col items-center justify-center px-4 py-12 sm:px-6">
         <section className="w-full max-w-md rounded-xl border border-slate-200/90 bg-white p-8 shadow-[0_4px_14px_rgba(0,0,0,0.08)] sm:p-10">
           <div className="mb-8 flex flex-col items-center text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-slate-600 to-slate-800 text-sm font-bold tracking-tight text-white shadow-md shadow-slate-900/25">
-              MW
-            </div>
-            <h1 className="mt-5 text-2xl font-bold tracking-tight text-slate-900">Metal Works</h1>
-            <p className="mt-2 text-sm text-slate-500">Sign in to your account</p>
+            <BrandLogo className="h-24 w-auto max-w-[260px] object-contain" />
+            <p className="mt-5 text-sm text-slate-500">Sign in to your account</p>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-5">

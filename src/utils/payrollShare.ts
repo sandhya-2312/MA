@@ -42,7 +42,7 @@ export function normalizePhoneForMessaging(contact: string | null | undefined): 
 }
 
 export function buildPayrollShareMessage(row: PayrollEmployeeRow, ctx: PayrollShareContext): string {
-  const company = (ctx.companyName ?? 'MC.Engg').trim();
+  const company = (ctx.companyName ?? 'MC.Engineering').trim();
   const project = (row.project ?? ctx.projectName).trim() || ctx.projectName;
   const breakdown = countAttendanceBreakdown(row.attendance);
   const otHours = row.total_ot_hours ?? countTotalOtHours(row.attendance);

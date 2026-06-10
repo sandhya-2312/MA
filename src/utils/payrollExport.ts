@@ -45,7 +45,7 @@ export async function buildPayrollExcelBlob(
 ): Promise<Blob> {
   const calendar = buildMonthCalendar(detail.year, detail.month);
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Metal Works';
+  workbook.creator = 'MC.Engineering';
   const sheet = workbook.addWorksheet('Payroll', {
     views: [{ state: 'frozen', xSplit: 4, ySplit: 3 }],
   });

@@ -119,7 +119,7 @@ export function SalariesToolbar({
                   commitSelection(onLoadSheet);
                 }
               }}
-              placeholder="e.g. MC.Engg"
+              placeholder="e.g. MC.Engineering"
               className="min-w-[10rem] rounded border border-slate-300 bg-white px-2.5 py-2 text-sm font-medium text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
             />
             <datalist id="salary-company-suggestions">

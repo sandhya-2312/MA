@@ -49,6 +49,7 @@ export function ProfilePage({ loggedInUser, status, handleSaveProfile }: Profile
               defaultValue={loggedInUser.fullName}
               placeholder="Enter full name"
               className={inputClass}
+              autoComplete="name"
               required
             />
           </div>
@@ -62,6 +63,7 @@ export function ProfilePage({ loggedInUser, status, handleSaveProfile }: Profile
               defaultValue={loggedInUser.username}
               placeholder="Login username"
               className={inputClass}
+              autoComplete="username"
               required
             />
           </div>
@@ -76,6 +78,7 @@ export function ProfilePage({ loggedInUser, status, handleSaveProfile }: Profile
               defaultValue={loggedInUser.email}
               placeholder="name@example.com"
               className={inputClass}
+              autoComplete="email"
               required
             />
           </div>
@@ -89,6 +92,7 @@ export function ProfilePage({ loggedInUser, status, handleSaveProfile }: Profile
               defaultValue={loggedInUser.contactNo}
               placeholder="Phone or mobile number"
               className={inputClass}
+              autoComplete="tel"
             />
           </div>
           <div>

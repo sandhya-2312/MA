@@ -46,7 +46,7 @@ export const MONTH_OPTIONS = [
 
 export const DEFAULT_PROJECTS = ['Maruti -1 Drydock', 'Maruti -2 Drydock', 'Yard Office'];
 
-export const DEFAULT_COMPANIES = ['MC.Engg'];
+export const DEFAULT_COMPANIES = ['MC.Engineering'];
 
 export function buildPayrollModuleTitle(
   month: number,
@@ -56,7 +56,7 @@ export function buildPayrollModuleTitle(
 ): string {
   const monthLabel = MONTH_OPTIONS.find((m) => m.value === month)?.label ?? String(month);
   const loc = (location ?? '').trim() || DEFAULT_PROJECTS[0];
-  const company = (companyName ?? 'MC.Engg').trim() || 'MC.Engg';
+  const company = (companyName ?? 'MC.Engineering').trim() || 'MC.Engineering';
   return `${company} Payroll : ${monthLabel} ${year} ( ${loc} )`;
 }
 

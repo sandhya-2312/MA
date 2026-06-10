@@ -951,7 +951,7 @@ export function CreateProjectForm({
             value={companyName}
             onValueChange={setCompanyName}
             options={DEFAULT_COMPANIES}
-            placeholder="e.g. MC.Engg"
+            placeholder="e.g. MC.Engineering"
             className={`${fieldClass} w-full`}
           />
         </div>

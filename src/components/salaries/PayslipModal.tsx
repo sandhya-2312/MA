@@ -17,7 +17,7 @@ export function PayslipModal({ open, row, shareContext, onClose }: PayslipModalP
   if (!open || !row) return null;
 
   const d = buildPayslipDetails(row, shareContext);
-  const company = (shareContext.companyName ?? 'MC.Engg').trim();
+  const company = (shareContext.companyName ?? 'MC.Engineering').trim();
   const project = (d.row.project ?? shareContext.projectName).trim() || shareContext.projectName;
 
   const handlePrint = () => {
