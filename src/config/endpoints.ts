@@ -2,6 +2,7 @@ export const API_ENDPOINTS = {
   health: '/health',
   login: '/login',
   changePassword: '/change-password',
+  forgotPassword: '/forgot-password',
   profile: '/profile',
   users: '/users',
   user: (userId: number) => `/users/${userId}`,

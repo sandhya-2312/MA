@@ -1,15 +1,70 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import { forgotPassword } from '../services/authApi.ts';
 import { BrandLogo } from './BrandLogo.tsx';
 
 type LoginPageProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   loginError: string;
+  defaultUsername?: string;
+  defaultRememberMe?: boolean;
 };
 
-export function LoginPage({ onSubmit, loginError }: LoginPageProps) {
+export function LoginPage({
+  onSubmit,
+  loginError,
+  defaultUsername = '',
+  defaultRememberMe = false,
+}: LoginPageProps) {
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberMe, setRememberMe] = useState(defaultRememberMe);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotUsername, setForgotUsername] = useState(defaultUsername);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotError, setForgotError] = useState('');
+  const [forgotMessage, setForgotMessage] = useState('');
+  const [forgotTempPassword, setForgotTempPassword] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+
+  const openForgotPassword = () => {
+    setShowForgotPassword(true);
+    setForgotUsername(defaultUsername);
+    setForgotEmail('');
+    setForgotError('');
+    setForgotMessage('');
+    setForgotTempPassword('');
+  };
+
+  const closeForgotPassword = () => {
+    setShowForgotPassword(false);
+    setForgotError('');
+    setForgotMessage('');
+    setForgotTempPassword('');
+  };
+
+  const handleForgotPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const username = forgotUsername.trim();
+    const email = forgotEmail.trim();
+    if (!username || !email) {
+      setForgotError('Username and email are required.');
+      return;
+    }
+
+    setForgotLoading(true);
+    setForgotError('');
+    setForgotMessage('');
+    setForgotTempPassword('');
+    try {
+      const response = await forgotPassword(username, email);
+      setForgotMessage(response.message);
+      setForgotTempPassword(response.temporary_password ?? '');
+    } catch (error) {
+      setForgotError(error instanceof Error ? error.message : 'Unable to reset password');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-white font-sans">
@@ -29,6 +84,7 @@ export function LoginPage({ onSubmit, loginError }: LoginPageProps) {
                 id="login-username"
                 name="username"
                 autoComplete="username"
+                defaultValue={defaultUsername}
                 placeholder="Enter username"
                 className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 outline-none ring-teal-500/20 transition focus:border-[#5FC6B7] focus:ring-2"
                 required
@@ -83,13 +139,13 @@ export function LoginPage({ onSubmit, loginError }: LoginPageProps) {
                 />
                 Remember me
               </label>
-              <a
-                href="#"
+              <button
+                type="button"
                 className="text-sm font-medium text-[#2d9d8f] transition hover:text-[#247a70] hover:underline"
-                onClick={(e) => e.preventDefault()}
+                onClick={openForgotPassword}
               >
                 Forgot password?
-              </a>
+              </button>
             </div>
 
             {loginError ? <p className="text-sm text-red-600">{loginError}</p> : null}
@@ -102,8 +158,102 @@ export function LoginPage({ onSubmit, loginError }: LoginPageProps) {
             </button>
           </form>
         </section>
+
+        <p className="mt-6 text-center text-xs text-slate-400">
+          Designed by Turiya Softech Pvt Ltd.
+        </p>
       </main>
 
+      {showForgotPassword ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="forgot-password-title"
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8"
+          >
+            <div className="mb-5 flex items-start justify-between gap-3">
+              <div>
+                <h2 id="forgot-password-title" className="text-lg font-semibold text-slate-800">
+                  Reset password
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Enter your username and registered email to receive a temporary password.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeForgotPassword}
+                className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Close reset password dialog"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div>
+                <label htmlFor="forgot-username" className="mb-1.5 block text-sm font-semibold text-slate-800">
+                  Username
+                </label>
+                <input
+                  id="forgot-username"
+                  value={forgotUsername}
+                  onChange={(e) => setForgotUsername(e.target.value)}
+                  autoComplete="username"
+                  placeholder="Enter username"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 outline-none ring-teal-500/20 transition focus:border-[#5FC6B7] focus:ring-2"
+                  required
+                />
+              </div>
+
+              <div>
+                <label htmlFor="forgot-email" className="mb-1.5 block text-sm font-semibold text-slate-800">
+                  Email
+                </label>
+                <input
+                  id="forgot-email"
+                  type="email"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  autoComplete="email"
+                  placeholder="Enter registered email"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 outline-none ring-teal-500/20 transition focus:border-[#5FC6B7] focus:ring-2"
+                  required
+                />
+              </div>
+
+              {forgotError ? <p className="text-sm text-red-600">{forgotError}</p> : null}
+              {forgotMessage ? <p className="text-sm text-emerald-700">{forgotMessage}</p> : null}
+              {forgotTempPassword ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">Temporary password</p>
+                  <p className="mt-1 font-mono text-sm text-emerald-900">{forgotTempPassword}</p>
+                </div>
+              ) : null}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={closeForgotPassword}
+                  className="flex-1 rounded-md border border-slate-200 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  disabled={forgotLoading}
+                  className="flex-1 rounded-md bg-teal-600 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {forgotLoading ? 'Resetting…' : 'Reset password'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

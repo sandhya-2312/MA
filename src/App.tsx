@@ -37,6 +37,37 @@ import {
   updateUser,
 } from './services/index.ts';
 const SESSION_AUTH_KEY = 'ma_session_auth';
+const REMEMBER_ME_KEY = 'ma_remember_me';
+const REMEMBERED_USERNAME_KEY = 'ma_remembered_username';
+
+function readRememberMePreference(): boolean {
+  try {
+    return localStorage.getItem(REMEMBER_ME_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function readRememberedUsername(): string {
+  try {
+    return localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function persistRememberMePreference(rememberMe: boolean, username: string) {
+  try {
+    localStorage.setItem(REMEMBER_ME_KEY, rememberMe ? 'true' : 'false');
+    if (rememberMe) {
+      localStorage.setItem(REMEMBERED_USERNAME_KEY, username);
+    } else {
+      localStorage.removeItem(REMEMBERED_USERNAME_KEY);
+    }
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 function getPathState(pathname: string): { tab: NavTab; summaryProjectId: number | null } {
   const clean = pathname.trim().toLowerCase();
   if (clean === '/projects' || clean === '/projects/') return { tab: 'projects', summaryProjectId: null };
@@ -79,7 +110,7 @@ const ROLES: Role[] = ['Admin', 'User', 'Viewer'];
 
 function readStoredAuth(): SessionAuth | null {
   try {
-    const raw = localStorage.getItem(SESSION_AUTH_KEY);
+    const raw = localStorage.getItem(SESSION_AUTH_KEY) ?? sessionStorage.getItem(SESSION_AUTH_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SessionAuth>;
     if (
@@ -530,8 +561,10 @@ export default function App() {
     const formData = new FormData(form);
     const username = String(formData.get('username') ?? '').trim();
     const password = String(formData.get('password') ?? '').trim();
+    const rememberMe = formData.get('rememberMe') === 'on';
     try {
-      const loginResponse = await login(username, password);
+      const loginResponse = await login(username, password, rememberMe);
+      persistRememberMePreference(rememberMe, username);
       setAuth({
         accessToken: loginResponse.access_token,
         username,
@@ -542,7 +575,12 @@ export default function App() {
       setLoginError('');
       setStatus('Loading…');
       setAdminProjectSearch('');
-      form.reset();
+      if (!rememberMe) {
+        form.reset();
+      } else {
+        const passwordInput = form.querySelector<HTMLInputElement>('input[name="password"]');
+        if (passwordInput) passwordInput.value = '';
+      }
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Login failed');
     }
@@ -1032,8 +1070,19 @@ export default function App() {
 
   useEffect(() => {
     try {
-      if (auth) localStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(auth));
-      else localStorage.removeItem(SESSION_AUTH_KEY);
+      if (auth) {
+        const rememberMe = readRememberMePreference();
+        if (rememberMe) {
+          localStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(auth));
+          sessionStorage.removeItem(SESSION_AUTH_KEY);
+        } else {
+          sessionStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(auth));
+          localStorage.removeItem(SESSION_AUTH_KEY);
+        }
+      } else {
+        localStorage.removeItem(SESSION_AUTH_KEY);
+        sessionStorage.removeItem(SESSION_AUTH_KEY);
+      }
     } catch {
       /* ignore quota / private mode */
     }
@@ -1088,7 +1137,14 @@ export default function App() {
   }, [auth?.accessToken, auth?.firstLogin]);
 
   if (!loggedInUser || !auth) {
-    return <LoginPage onSubmit={handleLogin} loginError={loginError} />;
+    return (
+      <LoginPage
+        onSubmit={handleLogin}
+        loginError={loginError}
+        defaultUsername={readRememberedUsername()}
+        defaultRememberMe={readRememberMePreference()}
+      />
+    );
   }
   if (loggedInUser.firstLogin) {
     return <FirstLoginSetupPage user={loggedInUser} status={status} onSubmit={handleAdminSetup} />;

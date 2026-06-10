@@ -8,10 +8,22 @@ export type LoginResponse = {
   first_login: boolean;
 };
 
-export function login(username: string, password: string) {
+export type ForgotPasswordResponse = {
+  message: string;
+  temporary_password?: string | null;
+};
+
+export function login(username: string, password: string, rememberMe = false) {
   return apiRequest<LoginResponse>(API_ENDPOINTS.login, {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, remember_me: rememberMe }),
+  });
+}
+
+export function forgotPassword(username: string, email: string) {
+  return apiRequest<ForgotPasswordResponse>(API_ENDPOINTS.forgotPassword, {
+    method: 'POST',
+    body: JSON.stringify({ username, email }),
   });
 }
 
