@@ -16,7 +16,6 @@ import type { NavTab, Project, ProjectEntry, Role, UserAccount } from './types';
 import type { DashboardPointApi } from './services/dashboardApi.ts';
 import {
   type ApiUserRow,
-  assignUserToProject,
   createProject,
   createProjectData,
   createUser,
@@ -227,6 +226,7 @@ export default function App() {
   const [summaryProjectId, setSummaryProjectId] = useState<number | null>(null);
   const [showProjectCreateForm, setShowProjectCreateForm] = useState(false);
   const [showMemberCreateForm, setShowMemberCreateForm] = useState(false);
+  const [memberFormError, setMemberFormError] = useState('');
   const [editingMemberId, setEditingMemberId] = useState<number | null>(null);
   const [editFullName, setEditFullName] = useState('');
   const [editUsername, setEditUsername] = useState('');
@@ -704,6 +704,7 @@ export default function App() {
     event.preventDefault();
     const form = event.currentTarget;
     if (!auth || auth.role !== 'Admin') return false;
+    setMemberFormError('');
     const formData = new FormData(form);
     const fullName = String(formData.get('fullName') ?? '').trim();
     const usernamePart = String(formData.get('username') ?? '').trim();
@@ -715,11 +716,15 @@ export default function App() {
     const designation = String(formData.get('designation') ?? '').trim();
     const password = String(formData.get('password') ?? '').trim();
     if (!username) {
-      setStatus('First name (or username) is required.');
+      const message = 'Full name or username is required.';
+      setMemberFormError(message);
+      setStatus(message);
       return false;
     }
     if (password.length < 8) {
-      setStatus('Password must be at least 8 characters.');
+      const message = 'Password must be at least 8 characters.';
+      setMemberFormError(message);
+      setStatus(message);
       return false;
     }
     try {
@@ -727,22 +732,25 @@ export default function App() {
         username,
         password,
         role,
+        project_ids: projectIds,
         contact_no: contactNo || null,
         full_name: fullName || null,
         email: email || null,
         designation: designation || null,
       });
-      for (const projectId of projectIds) {
-        await assignUserToProject(auth.accessToken, created.user.id, projectId);
-      }
       await loadUsers(auth.accessToken, auth.role);
       await loadAdminProjectsPageSummary(auth.accessToken);
-      setStatus(`User created successfully. ${created.user.username} can login with the chosen password.`);
+      const roleLabel = role === 'Viewer' ? 'Viewer' : 'Member';
+      const message = `${roleLabel} "${created.user.username}" created. They can sign in at /login with the username and password you set.`;
+      setMemberFormError('');
+      setStatus(message);
       setShowMemberCreateForm(false);
       form.reset();
       return true;
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Failed to create user');
+      const message = error instanceof Error ? error.message : 'Failed to create user';
+      setMemberFormError(message);
+      setStatus(message);
       return false;
     }
   };
@@ -1216,6 +1224,8 @@ export default function App() {
       handleDeleteProject={handleDeleteProject}
       showMemberCreateForm={showMemberCreateForm}
       setShowMemberCreateForm={setShowMemberCreateForm}
+      memberFormError={memberFormError}
+      clearMemberFormError={() => setMemberFormError('')}
       editingMemberId={editingMemberId}
       editFullName={editFullName}
       setEditFullName={setEditFullName}

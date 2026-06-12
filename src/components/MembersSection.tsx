@@ -61,6 +61,8 @@ type MembersSectionProps = {
   loggedInUserId: number;
   showMemberCreateForm: boolean;
   setShowMemberCreateForm: (updater: (current: boolean) => boolean) => void;
+  memberFormError: string;
+  clearMemberFormError: () => void;
   handleCreateUser: (event: FormEvent<HTMLFormElement>) => Promise<boolean>;
   editingMemberId: number | null;
   editFullName: string;
@@ -92,6 +94,8 @@ export function MembersSection({
   loggedInUserId,
   showMemberCreateForm,
   setShowMemberCreateForm,
+  memberFormError,
+  clearMemberFormError,
   handleCreateUser,
   editingMemberId,
   editFullName,
@@ -174,6 +178,7 @@ export function MembersSection({
               type="button"
               onClick={() => {
                 setEditingMemberId(null);
+                clearMemberFormError();
                 setShowMemberCreateForm((current) => !current);
               }}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
@@ -280,6 +285,15 @@ export function MembersSection({
               onSubmit={handleCreateUser}
               className="grid gap-4 rounded-xl border border-slate-200/90 bg-white p-4 shadow-[0_4px_14px_rgba(0,0,0,0.04)] md:grid-cols-2"
             >
+              <p className="text-sm text-slate-500 md:col-span-2">
+                Create a Member or Viewer account. They can sign in at the login page with the username and password you
+                set here—no first-login setup is required.
+              </p>
+              {memberFormError ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 md:col-span-2">
+                  {memberFormError}
+                </p>
+              ) : null}
               <div>
                 <label className={memberLabelClass} htmlFor="create-member-full-name">
                   Full name

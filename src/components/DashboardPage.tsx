@@ -554,6 +554,8 @@ type DashboardPageProps = {
   handleDeleteProject: (projectId: number) => void;
   showMemberCreateForm: boolean;
   setShowMemberCreateForm: (updater: (current: boolean) => boolean) => void;
+  memberFormError: string;
+  clearMemberFormError: () => void;
   editingMemberId: number | null;
   editFullName: string;
   setEditFullName: (value: string) => void;
@@ -640,6 +642,8 @@ export function DashboardPage({
   handleDeleteProject,
   showMemberCreateForm,
   setShowMemberCreateForm,
+  memberFormError,
+  clearMemberFormError,
   editingMemberId,
   editFullName,
   setEditFullName,
@@ -2224,6 +2228,11 @@ export function DashboardPage({
                             }}
                             className="grid gap-3 rounded-xl border border-slate-200/90 bg-white p-4 shadow-[0_4px_14px_rgba(0,0,0,0.04)] md:grid-cols-2"
                           >
+                            {memberFormError ? (
+                              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 md:col-span-2">
+                                {memberFormError}
+                              </p>
+                            ) : null}
                             <input
                               name="fullName"
                               placeholder="First Name"
@@ -2781,6 +2790,8 @@ export function DashboardPage({
               loggedInUserId={loggedInUser.id}
               showMemberCreateForm={showMemberCreateForm}
               setShowMemberCreateForm={setShowMemberCreateForm}
+              memberFormError={memberFormError}
+              clearMemberFormError={clearMemberFormError}
               handleCreateUser={handleCreateUser}
               editingMemberId={editingMemberId}
               editFullName={editFullName}
