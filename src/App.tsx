@@ -1147,7 +1147,19 @@ export default function App() {
     );
   }
   if (loggedInUser.firstLogin) {
-    return <FirstLoginSetupPage user={loggedInUser} status={status} onSubmit={handleAdminSetup} />;
+    return (
+      <FirstLoginSetupPage
+        user={loggedInUser}
+        status={status}
+        onSubmit={handleAdminSetup}
+        onBackToLogin={() => {
+          setAuth(null);
+          setCurrentUserProfile(null);
+          setLoginError('');
+          setStatus('Use backend credentials to login.');
+        }}
+      />
+    );
   }
 
   return (

@@ -6,9 +6,10 @@ type FirstLoginSetupPageProps = {
   user: UserAccount;
   status: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onBackToLogin: () => void;
 };
 
-export function FirstLoginSetupPage({ user, status, onSubmit }: FirstLoginSetupPageProps) {
+export function FirstLoginSetupPage({ user, status, onSubmit, onBackToLogin }: FirstLoginSetupPageProps) {
   const [showPassword, setShowPassword] = useState(false);
 
   return (
@@ -89,6 +90,13 @@ export function FirstLoginSetupPage({ user, status, onSubmit }: FirstLoginSetupP
             className="w-full rounded-md bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
           >
             Complete Setup
+          </button>
+          <button
+            type="button"
+            onClick={onBackToLogin}
+            className="w-full rounded-md border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            Back to login page
           </button>
         </form>
         <p className="mt-3 text-sm text-slate-500">{status}</p>
